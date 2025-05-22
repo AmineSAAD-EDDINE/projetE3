@@ -2,35 +2,37 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 
-void main() => runApp(const MyApp());
+void main() => runApp(const MonApp());
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MonApp extends StatelessWidget {
+  const MonApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Anti-Gaspillage',
       theme: ThemeData(primarySwatch: Colors.green),
-      home: const MainScreen(),
+      home: const EcranPrincipal(),
     );
   }
 }
 
-class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+class EcranPrincipal extends StatefulWidget {
+  const EcranPrincipal({super.key});
+
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  State<EcranPrincipal> createState() => _EcranPrincipalState();
 }
 
-class _MainScreenState extends State<MainScreen> {
-  int _selectedIndex = 2; // Accueil au centre
+class _EcranPrincipalState extends State<EcranPrincipal> {
+  int _selectedIndex = 2;
 
   final List<Widget> _screens = const [
-    CalendarScreen(),
-    ShoppingListScreen(),
-    HomeScreen(),
-    RecipesScreen(),
-    ProfileScreen(),
+    CalendrierEcran(),
+    ListeCoursesEcran(),
+    AccueilEcran(),
+    RecettesEcran(),
+    ProfilEcran(),
   ];
 
   void _onTap(int index) {
@@ -44,6 +46,7 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onTap,
+        unselectedItemColor: Colors.grey,
         selectedItemColor: Colors.green,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Calendrier'),
@@ -57,22 +60,29 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+class AccueilEcran extends StatefulWidget {
+  const AccueilEcran({super.key});
+
+  @override
+  State<AccueilEcran> createState() => _AccueilEcranState();
+}
+
+class _AccueilEcranState extends State<AccueilEcran> {
+  final List<Map<String, dynamic>> produits = [];
+
   @override
   Widget build(BuildContext context) {
-    final products = [];
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Accueil')),
+      appBar: AppBar(title: const Text('Accueil'),
+                    backgroundColor: Colors.green),
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          for (var p in products)
+          for (var p in produits)
             Card(
               child: ListTile(
-                title: Text(p['name'] as String),
-                subtitle: Text(DateFormat('dd/MM/yyyy').format(p['date'] as DateTime)),
+                title: Text(p['name']),
+                subtitle: Text(DateFormat('dd/MM/yyyy').format(p['date'])),
                 leading: const Icon(Icons.fastfood),
               ),
             ),
@@ -80,7 +90,7 @@ class HomeScreen extends StatelessWidget {
           Center(
             child: FloatingActionButton(
               onPressed: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ScanScreen()));
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ScanEcran()));
               },
               child: const Icon(Icons.add),
             ),
@@ -91,12 +101,36 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class ScanScreen extends StatelessWidget {
-  const ScanScreen({super.key});
+class ScanEcran extends StatefulWidget {
+  const ScanEcran({super.key});
+
+  @override
+  State<ScanEcran> createState() => _ScanEcranState();
+}
+
+class _ScanEcranState extends State<ScanEcran> {
+  final TextEditingController _controller = TextEditingController();
+
+  void _valider() {
+    final texte = _controller.text;
+    final entier = int.tryParse(texte);
+    if (entier != null) {
+      print('Code barre saisi : $entier');
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ResultatScanEcran(nomProduit: texte),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Veuillez saisir un numéro valide')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final TextEditingController _controller = TextEditingController();
-
     return Scaffold(
       appBar: AppBar(title: const Text('Scan')),
       body: Padding(
@@ -113,14 +147,7 @@ class ScanScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ScanResultScreen(nomProduit: _controller.text),
-                  ),
-                );
-              },
+              onPressed: _valider,              
               child: const Text('VALIDER'),
             ),
           ],
@@ -130,14 +157,19 @@ class ScanScreen extends StatelessWidget {
   }
 }
 
-class ScanResultScreen extends StatelessWidget {
+class ResultatScanEcran extends StatefulWidget {
   final String nomProduit;
-  const ScanResultScreen({super.key, required this.nomProduit});
+  const ResultatScanEcran({super.key, required this.nomProduit});
+
+  @override
+  State<ResultatScanEcran> createState() => _ResultatScanEcranState();
+}
+
+class _ResultatScanEcranState extends State<ResultatScanEcran> {
+  final TextEditingController _dateController = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
-    final TextEditingController _dateController = TextEditingController();
-
     return Scaffold(
       appBar: AppBar(title: const Text('Scan Réussi')),
       body: Padding(
@@ -146,7 +178,7 @@ class ScanResultScreen extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.shopping_basket),
-              title: Text(nomProduit.isEmpty ? 'Produit Scanné' : nomProduit),
+              title: Text(widget.nomProduit.isEmpty ? 'Produit Scanné' : widget.nomProduit),
             ),
             const SizedBox(height: 10),
             const Text('Saisissez la date de péremption du produit'),
@@ -172,12 +204,18 @@ class ScanResultScreen extends StatelessWidget {
   }
 }
 
-class RecipesScreen extends StatelessWidget {
-  const RecipesScreen({super.key});
+class RecettesEcran extends StatefulWidget {
+  const RecettesEcran({super.key});
+
+  @override
+  State<RecettesEcran> createState() => _RecettesEcranState();
+}
+
+class _RecettesEcranState extends State<RecettesEcran> {
+  final List<Map<String, dynamic>> recettes = [];
+
   @override
   Widget build(BuildContext context) {
-    final recipes = [];
-
     return Scaffold(
       appBar: AppBar(title: const Text('Recettes')),
       body: ListView(
@@ -191,18 +229,18 @@ class RecipesScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          for (var recipe in recipes)
+          for (var recette in recettes)
             Card(
               child: ListTile(
-                title: Text(recipe['name'] as String),
+                title: Text(recette['name']),
                 trailing: const Text('Détails >'),
                 onTap: () => showDialog(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: Text(recipe['name'] as String),
+                    title: Text(recette['name']),
                     content: Column(
                       mainAxisSize: MainAxisSize.min,
-                      children: (recipe['ingredients'] as List<String>)
+                      children: (recette['ingredients'] as List<String>)
                           .map((i) => Text('• $i'))
                           .toList(),
                     ),
@@ -219,13 +257,27 @@ class RecipesScreen extends StatelessWidget {
   }
 }
 
-class ShoppingListScreen extends StatelessWidget {
-  const ShoppingListScreen({super.key});
+class ListeCoursesEcran extends StatefulWidget {
+  const ListeCoursesEcran({super.key});
+
+  @override
+  State<ListeCoursesEcran> createState() => _ListeCoursesEcranState();
+}
+
+class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
+  final List<String> items = [];
+  final Map<String, bool> completed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    for (var item in items) {
+      completed[item] = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final items = [];
-    final Map<String, bool> completed = {for (var i in items) i: false};
-
     return Scaffold(
       appBar: AppBar(title: const Text('Liste de courses')),
       body: ListView(
@@ -235,7 +287,11 @@ class ShoppingListScreen extends StatelessWidget {
             CheckboxListTile(
               title: Text(item),
               value: completed[item],
-              onChanged: (val) {},
+              onChanged: (val) {
+                setState(() {
+                  completed[item] = val!;
+                });
+              },
             ),
           const Divider(),
           ElevatedButton(onPressed: () {}, child: const Text('Voir les recettes associées')),
@@ -246,14 +302,14 @@ class ShoppingListScreen extends StatelessWidget {
   }
 }
 
-class CalendarScreen extends StatefulWidget {
-  const CalendarScreen({super.key});
+class CalendrierEcran extends StatefulWidget {
+  const CalendrierEcran({super.key});
 
   @override
-  _CalendarScreenState createState() => _CalendarScreenState();
+  State<CalendrierEcran> createState() => _CalendrierEcranState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class _CalendrierEcranState extends State<CalendrierEcran> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
@@ -296,13 +352,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 }
 
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+class ProfilEcran extends StatefulWidget {
+  const ProfilEcran({super.key});
+
+  @override
+  State<ProfilEcran> createState() => _ProfilEcranState();
+}
+
+class _ProfilEcranState extends State<ProfilEcran> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Profil')),
-      body: Center(child: Text('Fonctionnalités à venir...')),
+      appBar: AppBar(title: const Text('Profil')),
+      body: const Center(child: Text('Fonctionnalités à venir...')),
     );
   }
 }
