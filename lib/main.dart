@@ -37,7 +37,9 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
     CalendrierEcran(),
     ListeCoursesEcran(),
     AccueilEcran(),
-    RecettesEcran(),
+    RecettesEcran(
+      produits: ['Eau de Source', 'Farine', 'Oeuf', 'Chocolat', 'Levure'],
+    ),
     ProfilEcran(),
   ];
 
@@ -104,10 +106,16 @@ class _AccueilEcranState extends State<AccueilEcran> {
               child: ListTile(
                 title: Text(p['name']),
                 subtitle: Text(DateFormat('dd/MM/yyyy').format(p['date'])),
-                leading: const Icon(Icons.food_bank_outlined),
+                leading: p['imageUrl'] != null
+                    ? Image.network(
+                        p['imageUrl'],
+                        width: 50,
+                        height: 50,
+                        fit: BoxFit.cover,
+                      )
+                    : const SizedBox(height: 20),
               ),
             ),
-          const SizedBox(height: 20),
           Center(
             child: FloatingActionButton(
               onPressed: () async {
@@ -133,6 +141,13 @@ class ScanEcran extends StatefulWidget {
   _ScanEcranState createState() => _ScanEcranState();
 }
 
+class ProduitInfo {
+  final String nom;
+  final String? imageUrl;
+
+  ProduitInfo(this.nom, this.imageUrl);
+}
+
 class _ScanEcranState extends State<ScanEcran> {
   String codeBarres = '';
 
@@ -146,17 +161,21 @@ class _ScanEcranState extends State<ScanEcran> {
             BarcodeFormat.ean13,
           ], // adapte selon besoin
           useCamera: -1, // caméra arrière par défaut
-          autoEnableFlash: true,
+          autoEnableFlash: false,
         ),
       );
 
       if (result.type == ResultType.Barcode) {
         setState(() => codeBarres = result.rawContent);
-        final nomProduit = await _nomDepuisCodeBarres(result.rawContent);
+        final produitInfo = await _infoDepuisCodeBarres(result.rawContent);
+
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => ResultatEcranScan(nomProduit: nomProduit),
+            builder: (_) => ResultatEcranScan(
+              nomProduit: produitInfo.nom,
+              imageUrl: produitInfo.imageUrl,
+            ),
           ),
         );
       } else if (result.type == ResultType.Cancelled) {
@@ -168,12 +187,11 @@ class _ScanEcranState extends State<ScanEcran> {
     }
   }
 
-  Future<String> _nomDepuisCodeBarres(String code) async {
+  Future<ProduitInfo> _infoDepuisCodeBarres(String code) async {
     final url = Uri.parse(
       'https://world.openfoodfacts.net/api/v2/product/$code.json',
     );
 
-    // Authentification de type Basic: "off:off" encodée en Base64
     final headers = {
       'Authorization': 'Basic ${base64Encode(utf8.encode('off:off'))}',
     };
@@ -183,18 +201,18 @@ class _ScanEcranState extends State<ScanEcran> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
-        // Tu peux adapter ici selon la structure exacte de l'API v2
-        final productName = data['product']?['product_name'];
-        return productName ?? 'Produit inconnu';
+        final produit = data['product'];
+        final nomProduit = produit?['product_name'] ?? 'Produit inconnu';
+        final imageUrl = produit?['image_url'];
+        return ProduitInfo(nomProduit, imageUrl);
       } else if (response.statusCode == 404) {
-        return 'Produit non trouvé';
+        return ProduitInfo('Produit non trouvé', null);
       } else {
-        return 'Erreur serveur : ${response.statusCode}';
+        return ProduitInfo('Erreur serveur : ${response.statusCode}', null);
       }
     } catch (e) {
       print('Erreur lors de l\'appel à l\'API : $e');
-      return 'Erreur de connexion';
+      return ProduitInfo('Erreur de connexion', null);
     }
   }
 
@@ -335,8 +353,9 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
 
 class ResultatEcranScan extends StatefulWidget {
   final String nomProduit;
+  final String? imageUrl;
 
-  const ResultatEcranScan({Key? key, required this.nomProduit})
+  const ResultatEcranScan({Key? key, required this.nomProduit, this.imageUrl})
     : super(key: key);
 
   @override
@@ -432,7 +451,11 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
       return;
     }
 
-    final produit = {'name': widget.nomProduit, 'date': date};
+    final produit = {
+      'name': widget.nomProduit,
+      'date': date,
+      'imageUrl': widget.imageUrl,
+    };
 
     Navigator.pop(context, produit);
   }
@@ -513,61 +536,203 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 }
 
+class Recette {
+  final String titre;
+  final List<String> produits;
+
+  Recette({required this.titre, required this.produits});
+}
+
 class RecettesEcran extends StatefulWidget {
-  const RecettesEcran({super.key});
+  final List<String> produits;
+
+  const RecettesEcran({Key? key, required this.produits}) : super(key: key);
 
   @override
   State<RecettesEcran> createState() => _RecettesEcranState();
 }
 
 class _RecettesEcranState extends State<RecettesEcran> {
-  List<Map<String, dynamic>> recettes = [];
+  List<Recette>? recettes;
+  bool isLoading = false;
+  String? erreur;
+
+  @override
+  void initState() {
+    super.initState();
+    _genererRecette();
+  }
+
+  Future<void> _genererRecette() async {
+    setState(() {
+      isLoading = true;
+      erreur = null;
+      recettes = null;
+    });
+
+    final prompt =
+        "Je veux préparer plusieurs recettes avec ces ingrédients : ${widget.produits.join(', ')}. "
+        "Propose-moi 3 recettes simples, faciles et rapides. "
+        "Donne le résultat au format suivant pour chaque recette :\n"
+        "Titre : <titre de la recette>\n"
+        "Ingrédients :\n- ingrédient 1\n- ingrédient 2\n...\n"
+        "Instructions :\n1. étape 1\n2. étape 2\n...\n\n"
+        "Sépare chaque recette par 'Titre :'.";
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization':
+              'Bearer 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',
+        },
+        body: jsonEncode({
+          'model': 'gpt-4o-mini',
+          'messages': [
+            {'role': 'user', 'content': prompt},
+          ],
+          'max_tokens': 400,
+          'temperature': 0.7,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final String result = data['choices'][0]['message']['content'];
+
+        final parsedRecettes = _parseRecettes(result);
+
+        setState(() {
+          recettes = parsedRecettes;
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          erreur = "Erreur API : ${response.statusCode}";
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        erreur = "Erreur : $e";
+        isLoading = false;
+      });
+    }
+  }
+
+  List<Recette> _parseRecettes(String texte) {
+    // Simple parsing qui cherche "Titre", "Ingrédients", "Instructions"
+    // Peut être adapté selon le format précis de l'IA
+
+    final recettesParsed = <Recette>[];
+
+    // On peut découper en plusieurs recettes si l'IA en renvoie plusieurs (séparées par "Titre :")
+    final recettesBrutes = texte.split(
+      RegExp(r'\nTitre\s*:', caseSensitive: false),
+    );
+
+    for (var recetteBrute in recettesBrutes) {
+      if (recetteBrute.trim().isEmpty) continue;
+
+      String titre = '';
+      List<String> produits = [];
+
+      // On récupère le titre : la première ligne avant un saut de ligne
+      final titreMatch = RegExp(r'^(.*)').firstMatch(recetteBrute.trim());
+      if (titreMatch != null) {
+        titre = titreMatch.group(1)!.trim();
+      }
+
+      // On récupère ingrédients
+      final ingMatch = RegExp(
+        r'Ingrédients\s*:\s*\n([\s\S]*?)\n(?:Instructions|$)',
+        caseSensitive: false,
+      ).firstMatch(recetteBrute);
+      if (ingMatch != null) {
+        final ingText = ingMatch.group(1)!.trim();
+        produits = ingText
+            .split('\n')
+            .map((e) => e.replaceAll(RegExp(r'^[-\d\.\)\s]+'), '').trim())
+            .toList();
+      }
+
+      // On récupère instructions
+      final insMatch = RegExp(
+        r'Instructions\s*:\s*\n([\s\S]*)',
+        caseSensitive: false,
+      ).firstMatch(recetteBrute);
+      if (insMatch != null) {
+        final insText = insMatch.group(1)!.trim();
+        produits = insText
+            .split('\n')
+            .map((e) => e.replaceAll(RegExp(r'^\d+[\.\)\s]+'), '').trim())
+            .toList();
+      }
+
+      if (titre.isNotEmpty && produits.isNotEmpty) {
+        recettesParsed.add(Recette(titre: titre, produits: produits));
+      }
+    }
+
+    return recettesParsed;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Recettes'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(8),
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: const [
-              ElevatedButton(onPressed: null, child: Text('Filtre')),
-              ElevatedButton(onPressed: null, child: Text('Trier par')),
-            ],
-          ),
-          const SizedBox(height: 10),
-          for (var recette in recettes)
-            Card(
-              child: ListTile(
-                title: Text(recette['name']),
-                trailing: const Text('Détails >'),
-                onTap: () => showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: Text(recette['name']),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: (recette['ingredients'] as List<String>)
-                          .map((i) => Text('• $i'))
-                          .toList(),
+      appBar: AppBar(title: const Text('Recettes')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : erreur != null
+            ? Center(
+                child: Text(erreur!, style: const TextStyle(color: Colors.red)),
+              )
+            : recettes == null || recettes!.isEmpty
+            ? const Center(child: Text('Aucune recette trouvée.'))
+            : ListView.builder(
+                itemCount: recettes!.length,
+                itemBuilder: (context, index) {
+                  final recette = recettes![index];
+                  return ExpansionTile(
+                    title: Text(
+                      recette.titre,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Fermer'),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Ingrédients :',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            ...recette.produits.map((ing) => Text('- $ing')),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Instructions :',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            ...recette.produits.map((step) => Text('- $step')),
+                          ],
+                        ),
                       ),
                     ],
-                  ),
-                ),
+                  );
+                },
               ),
-            ),
-        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _genererRecette,
+        tooltip: 'Rafraîchir la recette',
+        child: const Icon(Icons.refresh),
       ),
     );
   }
