@@ -3,7 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:tesseract_ocr/tesseract_ocr.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -212,7 +212,7 @@ class _ScanEcranState extends State<ScanEcran> {
   }
 }
 
-class ResultatEcranScan extends StatefulWidget {
+/*class ResultatEcranScan extends StatefulWidget {
   final String nomProduit; // Reçu depuis ScanEcran
 
   const ResultatEcranScan({Key? key, required this.nomProduit})
@@ -226,6 +226,7 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   final TextEditingController _dateController = TextEditingController();
   File? _imageDate;
   String _dateScannee = '';
+  DateTime? _selectedDate;
 
   Future<void> _scanDatePeremption() async {
     final pickedFile = await ImagePicker().pickImage(
@@ -249,31 +250,43 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 
   void _enregistrer() {
-    String date = _dateController.text.trim();
-    if (date.isEmpty) {
+  String dateStr = _dateController.text.trim();
+  if (dateStr.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Veuillez entrer ou scanner une date de péremption.')),
+    );
+    return;
+  }
+
+  try {
+    final date = DateFormat('dd/MM/yyyy').parseStrict(dateStr);
+    if (date.isBefore(DateTime.now())) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez entrer ou scanner une date de péremption.'),
-        ),
+        const SnackBar(content: Text('Ce produit est déjà périmé !')),
       );
       return;
     }
 
-    // Enregistrement des données ici
-    // Par exemple : envoyer vers une base de données ou Provider
+    final produit = {
+      'name': widget.nomProduit,
+      'date': date,
+    };
 
+    Navigator.pop(context, produit);
+  } catch (_) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Produit enregistré avec succès !')),
+      const SnackBar(content: Text('Date invalide. Veuillez corriger manuellement.')),
     );
-
-    Navigator.pop(context);
   }
+}
 
   @override
   void dispose() {
     _dateController.dispose();
     super.dispose();
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -311,6 +324,187 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
               const Text('Aperçu de l\'image scannée :'),
               const SizedBox(height: 8),
               Image.file(_imageDate!, height: 150),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+*/
+
+class ResultatEcranScan extends StatefulWidget {
+  final String nomProduit;
+
+  const ResultatEcranScan({Key? key, required this.nomProduit})
+    : super(key: key);
+
+  @override
+  State<ResultatEcranScan> createState() => _ResultatEcranScanState();
+}
+
+class _ResultatEcranScanState extends State<ResultatEcranScan> {
+  final TextEditingController _dateController = TextEditingController();
+  File? _imageDate;
+  String _texteReconnu = '';
+  DateTime? _selectedDate;
+
+  final ImagePicker _picker = ImagePicker();
+
+  Future<void> _scanDatePeremption() async {
+    final pickedFile = await _picker.pickImage(source: ImageSource.camera);
+    if (pickedFile == null) return;
+
+    final inputImage = InputImage.fromFilePath(pickedFile.path);
+    final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+
+    final recognizedText = await textRecognizer.processImage(inputImage);
+    await textRecognizer.close();
+
+    String fullText = recognizedText.text;
+    String? dateExtraite = _extractDate(fullText);
+
+    setState(() {
+      _imageDate = File(pickedFile.path);
+      _texteReconnu = fullText;
+      _dateController.text = dateExtraite ?? '';
+    });
+  }
+
+  String? _extractDate(String text) {
+    // Liste des regex pour plusieurs formats de date communs
+    final List<RegExp> regexList = [
+      RegExp(
+        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})',
+      ), // ex: 12/05/2025 ou 12-05-2025
+      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'), // ex: 2025-05-12
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'), // ex: 12/05/25
+    ];
+
+    for (var regex in regexList) {
+      final match = regex.firstMatch(text);
+      if (match != null) {
+        return match.group(0);
+      }
+    }
+    return null;
+  }
+
+  void _enregistrer() {
+    String dateStr = _dateController.text.trim();
+    if (dateStr.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Veuillez entrer ou scanner une date.')),
+      );
+      return;
+    }
+
+    DateTime? date;
+
+    // Essayons plusieurs formats
+    List<DateFormat> tryFormats = [
+      DateFormat('dd/MM/yyyy'),
+      DateFormat('dd-MM-yyyy'),
+      DateFormat('yyyy-MM-dd'),
+      DateFormat('yyyy/MM/dd'),
+      DateFormat('dd/MM/yy'),
+      DateFormat('dd-MM-yy'),
+    ];
+
+    for (var format in tryFormats) {
+      try {
+        date = format.parseStrict(dateStr);
+        break;
+      } catch (_) {}
+    }
+
+    if (date == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Format de date non reconnu.')),
+      );
+      return;
+    }
+
+    if (date.isBefore(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ce produit est déjà périmé !')),
+      );
+      return;
+    }
+
+    final produit = {'name': widget.nomProduit, 'date': date};
+
+    Navigator.pop(context, produit);
+  }
+
+  @override
+  void dispose() {
+    _dateController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Résultat du scan')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Text(
+              'Produit : ${widget.nomProduit}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _dateController,
+              decoration: const InputDecoration(
+                labelText: 'Date de péremption',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () async {
+                final pickedDate = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2030),
+                );
+                if (pickedDate != null) {
+                  setState(() {
+                    _selectedDate = pickedDate;
+                    _dateController.text = DateFormat(
+                      'dd/MM/yyyy',
+                    ).format(pickedDate);
+                  });
+                }
+              },
+              child: const Text('Sélectionner la date manuellement'),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _scanDatePeremption,
+              icon: const Icon(Icons.camera_alt),
+              label: const Text('Scanner la date via OCR'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _enregistrer,
+              child: const Text('Enregistrer le produit'),
+            ),
+            if (_imageDate != null) ...[
+              const SizedBox(height: 20),
+              const Text('Aperçu de l\'image :'),
+              const SizedBox(height: 8),
+              Image.file(_imageDate!, height: 150),
+            ],
+            if (_texteReconnu.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              const Text('Texte reconnu par OCR :'),
+              const SizedBox(height: 8),
+              Text(_texteReconnu),
             ],
           ],
         ),
