@@ -5,6 +5,8 @@ import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 void main() => runApp(const MonApp());
 
@@ -150,12 +152,11 @@ class _ScanEcranState extends State<ScanEcran> {
 
       if (result.type == ResultType.Barcode) {
         setState(() => codeBarres = result.rawContent);
+        final nomProduit = await _nomDepuisCodeBarres(result.rawContent);
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => ResultatEcranScan(
-              nomProduit: _nomDepuisCodeBarres(result.rawContent),
-            ),
+            builder: (_) => ResultatEcranScan(nomProduit: nomProduit),
           ),
         );
       } else if (result.type == ResultType.Cancelled) {
@@ -167,9 +168,34 @@ class _ScanEcranState extends State<ScanEcran> {
     }
   }
 
-  String _nomDepuisCodeBarres(String code) {
-    // Remplacer par une vraie base de données ou API
-    return ' $code';
+  Future<String> _nomDepuisCodeBarres(String code) async {
+    final url = Uri.parse(
+      'https://world.openfoodfacts.net/api/v2/product/$code.json',
+    );
+
+    // Authentification de type Basic: "off:off" encodée en Base64
+    final headers = {
+      'Authorization': 'Basic ${base64Encode(utf8.encode('off:off'))}',
+    };
+
+    try {
+      final response = await http.get(url, headers: headers);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        // Tu peux adapter ici selon la structure exacte de l'API v2
+        final productName = data['product']?['product_name'];
+        return productName ?? 'Produit inconnu';
+      } else if (response.statusCode == 404) {
+        return 'Produit non trouvé';
+      } else {
+        return 'Erreur serveur : ${response.statusCode}';
+      }
+    } catch (e) {
+      print('Erreur lors de l\'appel à l\'API : $e');
+      return 'Erreur de connexion';
+    }
   }
 
   @override
