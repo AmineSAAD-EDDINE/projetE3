@@ -8,6 +8,24 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+class ProfilAvatarButton extends StatelessWidget {
+  final String photoUrl;
+  const ProfilAvatarButton({super.key, required this.photoUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ProfilEcran()),
+        );
+      },
+      icon: CircleAvatar(backgroundImage: NetworkImage(photoUrl), radius: 18),
+    );
+  }
+}
+
 void main() => runApp(const MonApp());
 
 class MonApp extends StatelessWidget {
@@ -37,7 +55,9 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
     CalendrierEcran(),
     ListeCoursesEcran(),
     AccueilEcran(),
-    RecettesEcran(),
+    RecettesEcran(
+      produits: ['Eau de Source', 'Farine', 'Oeuf', 'Chocolat', 'Levure'],
+    ),
     ProfilEcran(),
   ];
 
@@ -93,8 +113,12 @@ class _AccueilEcranState extends State<AccueilEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Accueil'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
+        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
@@ -104,10 +128,16 @@ class _AccueilEcranState extends State<AccueilEcran> {
               child: ListTile(
                 title: Text(p['name']),
                 subtitle: Text(DateFormat('dd/MM/yyyy').format(p['date'])),
-                leading: const Icon(Icons.food_bank_outlined),
+                leading: p['imageUrl'] != null
+                    ? Image.network(
+                        p['imageUrl'],
+                        width: 50,
+                        height: 50,
+                        fit: BoxFit.cover,
+                      )
+                    : const SizedBox(height: 20),
               ),
             ),
-          const SizedBox(height: 20),
           Center(
             child: FloatingActionButton(
               onPressed: () async {
@@ -133,6 +163,13 @@ class ScanEcran extends StatefulWidget {
   _ScanEcranState createState() => _ScanEcranState();
 }
 
+class ProduitInfo {
+  final String nom;
+  final String? imageUrl;
+
+  ProduitInfo(this.nom, this.imageUrl);
+}
+
 class _ScanEcranState extends State<ScanEcran> {
   String codeBarres = '';
 
@@ -141,39 +178,36 @@ class _ScanEcranState extends State<ScanEcran> {
       var result = await BarcodeScanner.scan(
         options: ScanOptions(
           strings: {'cancel': 'Annuler'},
-          restrictFormat: [
-            BarcodeFormat.code128,
-            BarcodeFormat.ean13,
-          ], // adapte selon besoin
-          useCamera: -1, // caméra arrière par défaut
-          autoEnableFlash: true,
+          restrictFormat: [BarcodeFormat.code128, BarcodeFormat.ean13],
+          useCamera: -1,
+          autoEnableFlash: false,
         ),
       );
 
       if (result.type == ResultType.Barcode) {
         setState(() => codeBarres = result.rawContent);
-        final nomProduit = await _nomDepuisCodeBarres(result.rawContent);
+        final produitInfo = await _infoDepuisCodeBarres(result.rawContent);
+
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => ResultatEcranScan(nomProduit: nomProduit),
+            builder: (_) => ResultatEcranScan(
+              nomProduit: produitInfo.nom,
+              imageUrl: produitInfo.imageUrl,
+            ),
           ),
         );
-      } else if (result.type == ResultType.Cancelled) {
-        // L’utilisateur a annulé le scan
-      }
+      } else if (result.type == ResultType.Cancelled) {}
     } catch (e) {
-      // Gestion d'erreur
       print('Erreur lors du scan : $e');
     }
   }
 
-  Future<String> _nomDepuisCodeBarres(String code) async {
+  Future<ProduitInfo> _infoDepuisCodeBarres(String code) async {
     final url = Uri.parse(
       'https://world.openfoodfacts.net/api/v2/product/$code.json',
     );
 
-    // Authentification de type Basic: "off:off" encodée en Base64
     final headers = {
       'Authorization': 'Basic ${base64Encode(utf8.encode('off:off'))}',
     };
@@ -183,18 +217,18 @@ class _ScanEcranState extends State<ScanEcran> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
-        // Tu peux adapter ici selon la structure exacte de l'API v2
-        final productName = data['product']?['product_name'];
-        return productName ?? 'Produit inconnu';
+        final produit = data['product'];
+        final nomProduit = produit?['product_name'] ?? 'Produit inconnu';
+        final imageUrl = produit?['image_url'];
+        return ProduitInfo(nomProduit, imageUrl);
       } else if (response.statusCode == 404) {
-        return 'Produit non trouvé';
+        return ProduitInfo('Produit non trouvé', null);
       } else {
-        return 'Erreur serveur : ${response.statusCode}';
+        return ProduitInfo('Erreur serveur : ${response.statusCode}', null);
       }
     } catch (e) {
       print('Erreur lors de l\'appel à l\'API : $e');
-      return 'Erreur de connexion';
+      return ProduitInfo('Erreur de connexion', null);
     }
   }
 
@@ -213,130 +247,131 @@ class _ScanEcranState extends State<ScanEcran> {
 }
 
 /*class ResultatEcranScan extends StatefulWidget {
-  final String nomProduit; // Reçu depuis ScanEcran
+    final String nomProduit; // Reçu depuis ScanEcran
 
-  const ResultatEcranScan({Key? key, required this.nomProduit})
-    : super(key: key);
+    const ResultatEcranScan({Key? key, required this.nomProduit})
+      : super(key: key);
 
-  @override
-  State<ResultatEcranScan> createState() => _ResultatEcranScanState();
-}
+    @override
+    State<ResultatEcranScan> createState() => _ResultatEcranScanState();
+  }
 
-class _ResultatEcranScanState extends State<ResultatEcranScan> {
-  final TextEditingController _dateController = TextEditingController();
-  File? _imageDate;
-  String _dateScannee = '';
-  DateTime? _selectedDate;
+  class _ResultatEcranScanState extends State<ResultatEcranScan> {
+    final TextEditingController _dateController = TextEditingController();
+    File? _imageDate;
+    String _dateScannee = '';
+    DateTime? _selectedDate;
 
-  Future<void> _scanDatePeremption() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.camera,
-    );
-    if (pickedFile != null) {
-      final text = await TesseractOcr.extractText(pickedFile.path);
-      setState(() {
-        _imageDate = File(pickedFile.path);
-        _dateScannee = text;
-        _dateController.text = _extractDate(text);
-      });
+    Future<void> _scanDatePeremption() async {
+      final pickedFile = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+      );
+      if (pickedFile != null) {
+        final text = await TesseractOcr.extractText(pickedFile.path);
+        setState(() {
+          _imageDate = File(pickedFile.path);
+          _dateScannee = text;
+          _dateController.text = _extractDate(text);
+        });
+      }
     }
-  }
 
-  String _extractDate(String text) {
-    // Exemple : chercher une date de type JJ/MM/AAAA ou similaire
-    final regex = RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})');
-    final match = regex.firstMatch(text);
-    return match != null ? match.group(0)! : text;
-  }
+    String _extractDate(String text) {
+      // Exemple : chercher une date de type JJ/MM/AAAA ou similaire
+      final regex = RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})');
+      final match = regex.firstMatch(text);
+      return match != null ? match.group(0)! : text;
+    }
 
-  void _enregistrer() {
-  String dateStr = _dateController.text.trim();
-  if (dateStr.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Veuillez entrer ou scanner une date de péremption.')),
-    );
-    return;
-  }
-
-  try {
-    final date = DateFormat('dd/MM/yyyy').parseStrict(dateStr);
-    if (date.isBefore(DateTime.now())) {
+    void _enregistrer() {
+    String dateStr = _dateController.text.trim();
+    if (dateStr.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ce produit est déjà périmé !')),
+        const SnackBar(content: Text('Veuillez entrer ou scanner une date de péremption.')),
       );
       return;
     }
 
-    final produit = {
-      'name': widget.nomProduit,
-      'date': date,
-    };
+    try {
+      final date = DateFormat('dd/MM/yyyy').parseStrict(dateStr);
+      if (date.isBefore(DateTime.now())) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ce produit est déjà périmé !')),
+        );
+        return;
+      }
 
-    Navigator.pop(context, produit);
-  } catch (_) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Date invalide. Veuillez corriger manuellement.')),
-    );
+      final produit = {
+        'name': widget.nomProduit,
+        'date': date,
+      };
+
+      Navigator.pop(context, produit);
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Date invalide. Veuillez corriger manuellement.')),
+      );
+    }
   }
-}
 
-  @override
-  void dispose() {
-    _dateController.dispose();
-    super.dispose();
-  }
-
+    @override
+    void dispose() {
+      _dateController.dispose();
+      super.dispose();
+    }
 
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Résultat du scan')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Text(
-              'Produit : ${widget.nomProduit}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _dateController,
-              decoration: const InputDecoration(
-                labelText: 'Date de péremption',
-                border: OutlineInputBorder(),
+
+    @override
+    Widget build(BuildContext context) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Résultat du scan')),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            children: [
+              Text(
+                'Produit : ${widget.nomProduit}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _scanDatePeremption,
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Scanner la date de péremption'),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _enregistrer,
-              child: const Text('Enregistrer le produit'),
-            ),
-            if (_imageDate != null) ...[
+              const SizedBox(height: 16),
+              TextField(
+                controller: _dateController,
+                decoration: const InputDecoration(
+                  labelText: 'Date de péremption',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _scanDatePeremption,
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('Scanner la date de péremption'),
+              ),
               const SizedBox(height: 24),
-              const Text('Aperçu de l\'image scannée :'),
-              const SizedBox(height: 8),
-              Image.file(_imageDate!, height: 150),
+              ElevatedButton(
+                onPressed: _enregistrer,
+                child: const Text('Enregistrer le produit'),
+              ),
+              if (_imageDate != null) ...[
+                const SizedBox(height: 24),
+                const Text('Aperçu de l\'image scannée :'),
+                const SizedBox(height: 8),
+                Image.file(_imageDate!, height: 150),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
-}
-*/
+  */
 
 class ResultatEcranScan extends StatefulWidget {
   final String nomProduit;
+  final String? imageUrl;
 
-  const ResultatEcranScan({Key? key, required this.nomProduit})
+  const ResultatEcranScan({Key? key, required this.nomProduit, this.imageUrl})
     : super(key: key);
 
   @override
@@ -372,13 +407,10 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 
   String? _extractDate(String text) {
-    // Liste des regex pour plusieurs formats de date communs
     final List<RegExp> regexList = [
-      RegExp(
-        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})',
-      ), // ex: 12/05/2025 ou 12-05-2025
-      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'), // ex: 2025-05-12
-      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'), // ex: 12/05/25
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})'),
+      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
     ];
 
     for (var regex in regexList) {
@@ -401,7 +433,6 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
 
     DateTime? date;
 
-    // Essayons plusieurs formats
     List<DateFormat> tryFormats = [
       DateFormat('dd/MM/yyyy'),
       DateFormat('dd-MM-yyyy'),
@@ -432,8 +463,13 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
       return;
     }
 
-    final produit = {'name': widget.nomProduit, 'date': date};
+    final produit = {
+      'name': widget.nomProduit,
+      'date': date,
+      'imageUrl': widget.imageUrl,
+    };
 
+    Navigator.pop(context, produit);
     Navigator.pop(context, produit);
   }
 
@@ -513,62 +549,192 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 }
 
+class Recette {
+  final String titre;
+  final List<String> produits;
+
+  Recette({required this.titre, required this.produits});
+}
+
 class RecettesEcran extends StatefulWidget {
-  const RecettesEcran({super.key});
+  final List<String> produits;
+
+  const RecettesEcran({Key? key, required this.produits}) : super(key: key);
 
   @override
   State<RecettesEcran> createState() => _RecettesEcranState();
 }
 
 class _RecettesEcranState extends State<RecettesEcran> {
-  List<Map<String, dynamic>> recettes = [];
+  List<Recette>? recettes;
+  bool isLoading = false;
+  String? erreur;
+
+  @override
+  void initState() {
+    super.initState();
+    _genererRecette();
+  }
+
+  Future<void> _genererRecette() async {
+    setState(() {
+      isLoading = true;
+      erreur = null;
+      recettes = null;
+    });
+
+    final prompt =
+        "Je veux préparer plusieurs recettes avec ces ingrédients : ${widget.produits.join(', ')}. "
+        "Propose-moi 20 recettes simples, faciles et rapides. "
+        "Donne le résultat au format suivant pour chaque recette :\n"
+        " Titre :<titre de la recette>\n"
+        "Ingrédients :\n- ingrédient 1\n- ingrédient 2\n...\n"
+        "Instructions :\n1. étape 1\n2. étape 2\n...\n\n"
+        "Sépare chaque recette par 'Titre :'.";
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        headers: {'Content-Type': 'application/json', 'Authorization': ''},
+        body: jsonEncode({
+          'model': 'gpt-4o-mini',
+          'messages': [
+            {'role': 'user', 'content': prompt},
+          ],
+          'max_tokens': 400,
+          'temperature': 0.7,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final String result = data['choices'][0]['message']['content'];
+
+        final parsedRecettes = _parseRecettes(result);
+
+        setState(() {
+          recettes = parsedRecettes;
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          erreur = "Erreur API : ${response.statusCode}";
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        erreur = "Erreur : $e";
+        isLoading = false;
+      });
+    }
+  }
+
+  List<Recette> _parseRecettes(String texte) {
+    final recettesParsed = <Recette>[];
+
+    final recettesBrutes = texte.split(
+      RegExp(r'\nTitre\s*:', caseSensitive: false),
+    );
+
+    for (var recetteBrute in recettesBrutes) {
+      if (recetteBrute.trim().isEmpty) continue;
+
+      String titre = '';
+      List<String> produits = [];
+
+      final titreMatch = RegExp(r'^(.*)').firstMatch(recetteBrute.trim());
+      if (titreMatch != null) {
+        titre = titreMatch.group(1)!.trim();
+      }
+
+      final ingMatch = RegExp(
+        r'Ingrédients\s*:\s*\n([\s\S]*?)\n(?:Instructions|$)',
+        caseSensitive: false,
+      ).firstMatch(recetteBrute);
+      if (ingMatch != null) {
+        final ingText = ingMatch.group(1)!.trim();
+        produits = ingText
+            .split('\n')
+            .map((e) => e.replaceAll(RegExp(r'^[-\d\.\)\s]+'), '').trim())
+            .toList();
+      }
+
+      final insMatch = RegExp(
+        r'Instructions\s*:\s*\n([\s\S]*)',
+        caseSensitive: false,
+      ).firstMatch(recetteBrute);
+      if (insMatch != null) {
+        final insText = insMatch.group(1)!.trim();
+        produits = insText
+            .split('\n')
+            .map((e) => e.replaceAll(RegExp(r'^\d+[\.\)\s]+'), '').trim())
+            .toList();
+      }
+
+      if (titre.isNotEmpty && produits.isNotEmpty) {
+        recettesParsed.add(Recette(titre: titre, produits: produits));
+      }
+    }
+
+    return recettesParsed;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Recettes'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(8),
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: const [
-              ElevatedButton(onPressed: null, child: Text('Filtre')),
-              ElevatedButton(onPressed: null, child: Text('Trier par')),
-            ],
+        title: Text('Recettes'),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
           ),
-          const SizedBox(height: 10),
-          for (var recette in recettes)
-            Card(
-              child: ListTile(
-                title: Text(recette['name']),
-                trailing: const Text('Détails >'),
-                onTap: () => showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: Text(recette['name']),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: (recette['ingredients'] as List<String>)
-                          .map((i) => Text('• $i'))
-                          .toList(),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Fermer'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
+      body: isLoading
+          ? Center(child: CircularProgressIndicator())
+          : erreur != null
+          ? Center(child: Text(erreur!))
+          : recettes == null || recettes!.isEmpty
+          ? Center(child: Text("Aucune recette générée."))
+          : ListView.builder(
+              itemCount: recettes!.length,
+              itemBuilder: (context, index) {
+                final recette = recettes![index];
+                return Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Card(
+                    elevation: 3,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            recette.titre,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            'Ingrédients :',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          ...recette.produits.map(
+                            (ingredient) => Text('• $ingredient'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
@@ -597,8 +763,12 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Liste de courses'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
+        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
@@ -644,8 +814,12 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Calendrier'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
+        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -690,11 +864,77 @@ class ProfilEcran extends StatefulWidget {
 }
 
 class _ProfilEcranState extends State<ProfilEcran> {
+  String nom = "Utilisateur";
+  String email = "utilisateur@email.com";
+  String photoUrl = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
-      body: const Center(child: Text('Fonctionnalités à venir...')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(radius: 50, backgroundImage: NetworkImage(photoUrl)),
+              const SizedBox(height: 20),
+              Text(
+                nom,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                email,
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 30),
+              ElevatedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("À venir"),
+                      content: const Text(
+                        "Fonctionnalité de modification du profil bientôt disponible.",
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("OK"),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.edit),
+                label: const Text("Modifier le profil"),
+              ),
+              const SizedBox(height: 30),
+              ElevatedButton.icon(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Déconnexion... (à implémenter)"),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.logout),
+                label: const Text("Se déconnecter"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
