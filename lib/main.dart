@@ -8,6 +8,24 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+class ProfilAvatarButton extends StatelessWidget {
+  final String photoUrl;
+  const ProfilAvatarButton({super.key, required this.photoUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ProfilEcran()),
+        );
+      },
+      icon: CircleAvatar(backgroundImage: NetworkImage(photoUrl), radius: 18),
+    );
+  }
+}
+
 void main() => runApp(const MonApp());
 
 class MonApp extends StatelessWidget {
@@ -95,8 +113,12 @@ class _AccueilEcranState extends State<AccueilEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Accueil'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
+        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
@@ -156,11 +178,8 @@ class _ScanEcranState extends State<ScanEcran> {
       var result = await BarcodeScanner.scan(
         options: ScanOptions(
           strings: {'cancel': 'Annuler'},
-          restrictFormat: [
-            BarcodeFormat.code128,
-            BarcodeFormat.ean13,
-          ], // adapte selon besoin
-          useCamera: -1, // caméra arrière par défaut
+          restrictFormat: [BarcodeFormat.code128, BarcodeFormat.ean13],
+          useCamera: -1,
           autoEnableFlash: false,
         ),
       );
@@ -178,11 +197,8 @@ class _ScanEcranState extends State<ScanEcran> {
             ),
           ),
         );
-      } else if (result.type == ResultType.Cancelled) {
-        // L’utilisateur a annulé le scan
-      }
+      } else if (result.type == ResultType.Cancelled) {}
     } catch (e) {
-      // Gestion d'erreur
       print('Erreur lors du scan : $e');
     }
   }
@@ -231,125 +247,125 @@ class _ScanEcranState extends State<ScanEcran> {
 }
 
 /*class ResultatEcranScan extends StatefulWidget {
-  final String nomProduit; // Reçu depuis ScanEcran
+    final String nomProduit; // Reçu depuis ScanEcran
 
-  const ResultatEcranScan({Key? key, required this.nomProduit})
-    : super(key: key);
+    const ResultatEcranScan({Key? key, required this.nomProduit})
+      : super(key: key);
 
-  @override
-  State<ResultatEcranScan> createState() => _ResultatEcranScanState();
-}
+    @override
+    State<ResultatEcranScan> createState() => _ResultatEcranScanState();
+  }
 
-class _ResultatEcranScanState extends State<ResultatEcranScan> {
-  final TextEditingController _dateController = TextEditingController();
-  File? _imageDate;
-  String _dateScannee = '';
-  DateTime? _selectedDate;
+  class _ResultatEcranScanState extends State<ResultatEcranScan> {
+    final TextEditingController _dateController = TextEditingController();
+    File? _imageDate;
+    String _dateScannee = '';
+    DateTime? _selectedDate;
 
-  Future<void> _scanDatePeremption() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.camera,
-    );
-    if (pickedFile != null) {
-      final text = await TesseractOcr.extractText(pickedFile.path);
-      setState(() {
-        _imageDate = File(pickedFile.path);
-        _dateScannee = text;
-        _dateController.text = _extractDate(text);
-      });
+    Future<void> _scanDatePeremption() async {
+      final pickedFile = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+      );
+      if (pickedFile != null) {
+        final text = await TesseractOcr.extractText(pickedFile.path);
+        setState(() {
+          _imageDate = File(pickedFile.path);
+          _dateScannee = text;
+          _dateController.text = _extractDate(text);
+        });
+      }
     }
-  }
 
-  String _extractDate(String text) {
-    // Exemple : chercher une date de type JJ/MM/AAAA ou similaire
-    final regex = RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})');
-    final match = regex.firstMatch(text);
-    return match != null ? match.group(0)! : text;
-  }
+    String _extractDate(String text) {
+      // Exemple : chercher une date de type JJ/MM/AAAA ou similaire
+      final regex = RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})');
+      final match = regex.firstMatch(text);
+      return match != null ? match.group(0)! : text;
+    }
 
-  void _enregistrer() {
-  String dateStr = _dateController.text.trim();
-  if (dateStr.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Veuillez entrer ou scanner une date de péremption.')),
-    );
-    return;
-  }
-
-  try {
-    final date = DateFormat('dd/MM/yyyy').parseStrict(dateStr);
-    if (date.isBefore(DateTime.now())) {
+    void _enregistrer() {
+    String dateStr = _dateController.text.trim();
+    if (dateStr.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ce produit est déjà périmé !')),
+        const SnackBar(content: Text('Veuillez entrer ou scanner une date de péremption.')),
       );
       return;
     }
 
-    final produit = {
-      'name': widget.nomProduit,
-      'date': date,
-    };
+    try {
+      final date = DateFormat('dd/MM/yyyy').parseStrict(dateStr);
+      if (date.isBefore(DateTime.now())) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ce produit est déjà périmé !')),
+        );
+        return;
+      }
 
-    Navigator.pop(context, produit);
-  } catch (_) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Date invalide. Veuillez corriger manuellement.')),
-    );
+      final produit = {
+        'name': widget.nomProduit,
+        'date': date,
+      };
+
+      Navigator.pop(context, produit);
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Date invalide. Veuillez corriger manuellement.')),
+      );
+    }
   }
-}
 
-  @override
-  void dispose() {
-    _dateController.dispose();
-    super.dispose();
-  }
-
+    @override
+    void dispose() {
+      _dateController.dispose();
+      super.dispose();
+    }
 
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Résultat du scan')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Text(
-              'Produit : ${widget.nomProduit}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _dateController,
-              decoration: const InputDecoration(
-                labelText: 'Date de péremption',
-                border: OutlineInputBorder(),
+
+    @override
+    Widget build(BuildContext context) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Résultat du scan')),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            children: [
+              Text(
+                'Produit : ${widget.nomProduit}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _scanDatePeremption,
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Scanner la date de péremption'),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _enregistrer,
-              child: const Text('Enregistrer le produit'),
-            ),
-            if (_imageDate != null) ...[
+              const SizedBox(height: 16),
+              TextField(
+                controller: _dateController,
+                decoration: const InputDecoration(
+                  labelText: 'Date de péremption',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _scanDatePeremption,
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('Scanner la date de péremption'),
+              ),
               const SizedBox(height: 24),
-              const Text('Aperçu de l\'image scannée :'),
-              const SizedBox(height: 8),
-              Image.file(_imageDate!, height: 150),
+              ElevatedButton(
+                onPressed: _enregistrer,
+                child: const Text('Enregistrer le produit'),
+              ),
+              if (_imageDate != null) ...[
+                const SizedBox(height: 24),
+                const Text('Aperçu de l\'image scannée :'),
+                const SizedBox(height: 8),
+                Image.file(_imageDate!, height: 150),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
-}
-*/
+  */
 
 class ResultatEcranScan extends StatefulWidget {
   final String nomProduit;
@@ -391,13 +407,10 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 
   String? _extractDate(String text) {
-    // Liste des regex pour plusieurs formats de date communs
     final List<RegExp> regexList = [
-      RegExp(
-        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})',
-      ), // ex: 12/05/2025 ou 12-05-2025
-      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'), // ex: 2025-05-12
-      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'), // ex: 12/05/25
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})'),
+      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
     ];
 
     for (var regex in regexList) {
@@ -420,7 +433,6 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
 
     DateTime? date;
 
-    // Essayons plusieurs formats
     List<DateFormat> tryFormats = [
       DateFormat('dd/MM/yyyy'),
       DateFormat('dd-MM-yyyy'),
@@ -457,6 +469,7 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
       'imageUrl': widget.imageUrl,
     };
 
+    Navigator.pop(context, produit);
     Navigator.pop(context, produit);
   }
 
@@ -572,9 +585,9 @@ class _RecettesEcranState extends State<RecettesEcran> {
 
     final prompt =
         "Je veux préparer plusieurs recettes avec ces ingrédients : ${widget.produits.join(', ')}. "
-        "Propose-moi 3 recettes simples, faciles et rapides. "
+        "Propose-moi 20 recettes simples, faciles et rapides. "
         "Donne le résultat au format suivant pour chaque recette :\n"
-        "Titre : <titre de la recette>\n"
+        " Titre :<titre de la recette>\n"
         "Ingrédients :\n- ingrédient 1\n- ingrédient 2\n...\n"
         "Instructions :\n1. étape 1\n2. étape 2\n...\n\n"
         "Sépare chaque recette par 'Titre :'.";
@@ -622,12 +635,8 @@ class _RecettesEcranState extends State<RecettesEcran> {
   }
 
   List<Recette> _parseRecettes(String texte) {
-    // Simple parsing qui cherche "Titre", "Ingrédients", "Instructions"
-    // Peut être adapté selon le format précis de l'IA
-
     final recettesParsed = <Recette>[];
 
-    // On peut découper en plusieurs recettes si l'IA en renvoie plusieurs (séparées par "Titre :")
     final recettesBrutes = texte.split(
       RegExp(r'\nTitre\s*:', caseSensitive: false),
     );
@@ -638,13 +647,11 @@ class _RecettesEcranState extends State<RecettesEcran> {
       String titre = '';
       List<String> produits = [];
 
-      // On récupère le titre : la première ligne avant un saut de ligne
       final titreMatch = RegExp(r'^(.*)').firstMatch(recetteBrute.trim());
       if (titreMatch != null) {
         titre = titreMatch.group(1)!.trim();
       }
 
-      // On récupère ingrédients
       final ingMatch = RegExp(
         r'Ingrédients\s*:\s*\n([\s\S]*?)\n(?:Instructions|$)',
         caseSensitive: false,
@@ -657,7 +664,6 @@ class _RecettesEcranState extends State<RecettesEcran> {
             .toList();
       }
 
-      // On récupère instructions
       final insMatch = RegExp(
         r'Instructions\s*:\s*\n([\s\S]*)',
         caseSensitive: false,
@@ -681,59 +687,58 @@ class _RecettesEcranState extends State<RecettesEcran> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Recettes')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : erreur != null
-            ? Center(
-                child: Text(erreur!, style: const TextStyle(color: Colors.red)),
-              )
-            : recettes == null || recettes!.isEmpty
-            ? const Center(child: Text('Aucune recette trouvée.'))
-            : ListView.builder(
-                itemCount: recettes!.length,
-                itemBuilder: (context, index) {
-                  final recette = recettes![index];
-                  return ExpansionTile(
-                    title: Text(
-                      recette.titre,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+      appBar: AppBar(
+        title: Text('Recettes'),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
+      ),
+      body: isLoading
+          ? Center(child: CircularProgressIndicator())
+          : erreur != null
+          ? Center(child: Text(erreur!))
+          : recettes == null || recettes!.isEmpty
+          ? Center(child: Text("Aucune recette générée."))
+          : ListView.builder(
+              itemCount: recettes!.length,
+              itemBuilder: (context, index) {
+                final recette = recettes![index];
+                return Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Card(
+                    elevation: 3,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Ingrédients :',
-                              style: TextStyle(fontWeight: FontWeight.bold),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            recette.titre,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
-                            ...recette.produits.map((ing) => Text('- $ing')),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Instructions :',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            ...recette.produits.map((step) => Text('- $step')),
-                          ],
-                        ),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            'Ingrédients :',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          ...recette.produits.map(
+                            (ingredient) => Text('• $ingredient'),
+                          ),
+                        ],
                       ),
-                    ],
-                  );
-                },
-              ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _genererRecette,
-        tooltip: 'Rafraîchir la recette',
-        child: const Icon(Icons.refresh),
-      ),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
@@ -762,8 +767,12 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Liste de courses'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
+        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
@@ -809,8 +818,12 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Calendrier'),
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.green,
+        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -855,11 +868,77 @@ class ProfilEcran extends StatefulWidget {
 }
 
 class _ProfilEcranState extends State<ProfilEcran> {
+  String nom = "Utilisateur";
+  String email = "utilisateur@email.com";
+  String photoUrl = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
-      body: const Center(child: Text('Fonctionnalités à venir...')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(radius: 50, backgroundImage: NetworkImage(photoUrl)),
+              const SizedBox(height: 20),
+              Text(
+                nom,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                email,
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 30),
+              ElevatedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("À venir"),
+                      content: const Text(
+                        "Fonctionnalité de modification du profil bientôt disponible.",
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("OK"),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.edit),
+                label: const Text("Modifier le profil"),
+              ),
+              const SizedBox(height: 30),
+              ElevatedButton.icon(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Déconnexion... (à implémenter)"),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.logout),
+                label: const Text("Se déconnecter"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
