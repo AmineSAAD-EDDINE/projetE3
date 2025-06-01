@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "907185626418",
+    "project_id": "projete3-d77dc",
+    "storage_bucket": "projete3-d77dc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:907185626418:android:f60342018a97f45c880b2b",
+        "android_client_info": {
+          "package_name": "com.example.monfrigoplus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANCJcY8U_eDs5W9vzJRh3mHy1eQY-Nukw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

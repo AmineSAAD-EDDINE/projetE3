@@ -7,6 +7,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:firebase_core/firebase_core.dart';
 
 class ProfilAvatarButton extends StatelessWidget {
   final String photoUrl;
@@ -26,7 +27,17 @@ class ProfilAvatarButton extends StatelessWidget {
   }
 }
 
-void main() => runApp(const MonApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp()
+      .then((_) {
+        runApp(const MonApp());
+      })
+      .catchError((error) {
+        print("Erreur lors de l'initialisation de Firebase : $error");
+      });
+  runApp(const MonApp());
+}
 
 class MonApp extends StatelessWidget {
   const MonApp({super.key});
