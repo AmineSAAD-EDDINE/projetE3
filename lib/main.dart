@@ -595,11 +595,7 @@ class _RecettesEcranState extends State<RecettesEcran> {
     try {
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization':
-              'Bearer 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',
-        },
+        headers: {'Content-Type': 'application/json', 'Authorization': ''},
         body: jsonEncode({
           'model': 'gpt-4o-mini',
           'messages': [
