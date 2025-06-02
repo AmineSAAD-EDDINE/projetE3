@@ -581,6 +581,9 @@ class _RecettesEcranState extends State<RecettesEcran> {
   List<Recette>? recettes;
   bool isLoading = false;
   String? erreur;
+  final Stream<QuerySnapshot> _produitsStream = FirebaseFirestore.instance
+      .collection('produits')
+      .snapshots();
 
   @override
   void initState() {
