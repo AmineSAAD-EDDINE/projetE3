@@ -37,7 +37,6 @@ void main() async {
       .catchError((error) {
         print("Erreur lors de l'initialisation de Firebase : $error");
       });
-  runApp(const MonApp());
 }
 
 class MonApp extends StatelessWidget {
@@ -115,9 +114,20 @@ class _AccueilEcranState extends State<AccueilEcran> {
   List<Map<String, dynamic>> produits = [];
 
   void _ajouterProduit(Map<String, dynamic> produit) {
-    setState(() {
-      produits.add(produit);
-    });
+    FirebaseFirestore.instance
+        .collection('produits')
+        .add({
+          'nom': produit['name'],
+          'date_de_peremption': produit['date'].toIso8601String(),
+          'ajoute_le': Timestamp.now().toString(),
+          'image': produit['imageUrl'],
+        })
+        .then((value) {
+          print("Produit ajouté avec ID : ${value.id}");
+        })
+        .catchError((error) {
+          print("Erreur lors de l'ajout : $error");
+        });
   }
 
   @override
@@ -132,39 +142,116 @@ class _AccueilEcranState extends State<AccueilEcran> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          for (var p in produits)
-            Card(
-              child: ListTile(
-                title: Text(p['name']),
-                subtitle: Text(DateFormat('dd/MM/yyyy').format(p['date'])),
-                leading: p['imageUrl'] != null
-                    ? Image.network(
-                        p['imageUrl'],
-                        width: 50,
-                        height: 50,
-                        fit: BoxFit.cover,
-                      )
-                    : const SizedBox(height: 20),
-              ),
-            ),
-          Center(
-            child: FloatingActionButton(
-              onPressed: () async {
-                final result = await Navigator.push<Map<String, dynamic>>(
-                  context,
-                  MaterialPageRoute(builder: (_) => ScanEcran()),
-                );
-                if (result != null) {
-                  _ajouterProduit(result);
-                }
-              },
-              child: const Icon(Icons.add),
-            ),
-          ),
-        ],
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('produits')
+            .orderBy('date_de_peremption')
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Erreur de chargement.'));
+          }
+
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final produits = snapshot.data!.docs;
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: produits.length,
+            itemBuilder: (context, index) {
+              final p = produits[index];
+              final nom = p['nom'] ?? '';
+              final date = DateFormat(
+                'dd/MM/yyyy',
+              ).parse(p['date_de_peremption']);
+              final image = p['image'];
+              final estPerime = date.isBefore(DateTime.now());
+              final docId = p.id;
+
+              return Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                color: estPerime ? Colors.red[50] : Colors.white,
+                elevation: 4,
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.all(12),
+                  leading: image != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            image,
+                            width: 60,
+                            height: 60,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : const Icon(Icons.fastfood, size: 40),
+                  title: Text(
+                    nom,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: estPerime ? Colors.red : Colors.black,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Périme le ${DateFormat('dd/MM/yyyy').format(date)}',
+                    style: TextStyle(
+                      color: estPerime ? Colors.red : Colors.grey[700],
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: () async {
+                      final confirmation = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Supprimer le produit'),
+                          content: const Text(
+                            'Es-tu sûr de vouloir supprimer ce produit ?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Non'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Oui'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirmation == true) {
+                        FirebaseFirestore.instance
+                            .collection('produits')
+                            .doc(docId)
+                            .delete();
+                      }
+                    },
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          final result = await Navigator.push<Map<String, dynamic>>(
+            context,
+            MaterialPageRoute(builder: (_) => ScanEcran()),
+          );
+          if (result != null) {
+            _ajouterProduit(result);
+          }
+        },
+        child: const Icon(Icons.add),
       ),
     );
   }
