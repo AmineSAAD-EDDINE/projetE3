@@ -9,6 +9,10 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 
 class ProfilAvatarButton extends StatelessWidget {
   final String photoUrl;
@@ -30,6 +34,12 @@ class ProfilAvatarButton extends StatelessWidget {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
   await Firebase.initializeApp()
       .then((_) {
         runApp(const MonApp());
@@ -1076,71 +1086,121 @@ class _ProfilEcranState extends State<ProfilEcran> {
   String email = "utilisateur@email.com";
   String photoUrl = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
+  // Fréquences de notification disponibles
+  final Map<String, bool> frequences = {
+    "Le jour même": false,
+    "1 jour avant": false,
+    "3 jours avant": false,
+    "1 semaine avant": false,
+  };
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(radius: 50, backgroundImage: NetworkImage(photoUrl)),
-              const SizedBox(height: 20),
-              Text(
-                nom,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                email,
-                style: const TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text("À venir"),
-                      content: const Text(
-                        "Fonctionnalité de modification du profil bientôt disponible.",
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            CircleAvatar(radius: 50, backgroundImage: NetworkImage(photoUrl)),
+            const SizedBox(height: 20),
+            Text(
+              nom,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              email,
+              style: const TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("À venir"),
+                    content: const Text(
+                      "Fonctionnalité de modification du profil bientôt disponible.",
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("OK"),
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text("OK"),
-                        ),
-                      ],
+                    ],
+                  ),
+                );
+              },
+              icon: const Icon(Icons.edit),
+              label: const Text("Modifier le profil"),
+            ),
+            const SizedBox(height: 30),
+            // Paramétrage des notifications
+            Card(
+              elevation: 2,
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    const Text(
+                      "Paramètres de notifications",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.edit),
-                label: const Text("Modifier le profil"),
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text("Déconnexion... (à implémenter)"),
+                    const SizedBox(height: 10),
+                    ...frequences.keys.map(
+                      (freq) => CheckboxListTile(
+                        title: Text(freq),
+                        value: frequences[freq],
+                        onChanged: (val) {
+                          setState(() {
+                            frequences[freq] = val ?? false;
+                          });
+                          // Ici, tu pourrais sauvegarder le choix dans Firestore ou localement
+                        },
+                      ),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.logout),
-                label: const Text("Se déconnecter"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        // Ici, tu pourrais sauvegarder les préférences dans Firestore ou localement
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Préférences de notifications enregistrées.",
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.notifications_active),
+                      label: const Text("Enregistrer"),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton.icon(
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Déconnexion... (à implémenter)"),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.logout),
+              label: const Text("Se déconnecter"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
         ),
       ),
     );
