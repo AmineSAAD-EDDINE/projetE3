@@ -170,7 +170,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
               final image = p['image'];
               final estPerime = date.isBefore(DateTime.now());
               final docId = p.id;
-
               return Card(
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -668,25 +667,54 @@ class _RecettesEcranState extends State<RecettesEcran> {
   List<Recette>? recettes;
   bool isLoading = false;
   String? erreur;
-  final Stream<QuerySnapshot> _produitsStream = FirebaseFirestore.instance
-      .collection('produits')
-      .snapshots();
+
+  // Ajoute ta clé API ici
+  static const String openAIApiKey = 'TON_API_KEY_ICI';
 
   @override
   void initState() {
     super.initState();
-    _genererRecette();
+    _chargerIngredientsEtGenererRecette();
   }
 
-  Future<void> _genererRecette() async {
+  Future<void> _chargerIngredientsEtGenererRecette() async {
     setState(() {
       isLoading = true;
       erreur = null;
       recettes = null;
     });
 
+    try {
+      // Récupérer les ingrédients depuis Firestore (champ 'nom')
+      final snapshot = await FirebaseFirestore.instance
+          .collection('produits')
+          .get();
+
+      final ingredients = snapshot.docs
+          .map((doc) => doc['nom']?.toString() ?? '')
+          .where((nom) => nom.isNotEmpty)
+          .toList();
+
+      if (ingredients.isEmpty) {
+        setState(() {
+          erreur = "Aucun ingrédient trouvé dans la base de données.";
+          isLoading = false;
+        });
+        return;
+      }
+
+      await _genererRecette(ingredients);
+    } catch (e) {
+      setState(() {
+        erreur = "Erreur lors de la récupération des ingrédients : $e";
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _genererRecette(List<String> ingredients) async {
     final prompt =
-        "Je veux préparer plusieurs recettes avec ces ingrédients : ${widget.produits.join(', ')}. "
+        "Je veux préparer plusieurs recettes avec ces ingrédients : ${ingredients.join(', ')}. "
         "Propose-moi 20 recettes simples, faciles et rapides. "
         "Donne le résultat au format suivant pour chaque recette :\n"
         " Titre :<titre de la recette>\n"
@@ -697,7 +725,11 @@ class _RecettesEcranState extends State<RecettesEcran> {
     try {
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {'Content-Type': 'application/json', 'Authorization': ''},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization':
+              'Bearer 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',
+        },
         body: jsonEncode({
           'model': 'gpt-4o-mini',
           'messages': [
@@ -759,18 +791,6 @@ class _RecettesEcranState extends State<RecettesEcran> {
         produits = ingText
             .split('\n')
             .map((e) => e.replaceAll(RegExp(r'^[-\d\.\)\s]+'), '').trim())
-            .toList();
-      }
-
-      final insMatch = RegExp(
-        r'Instructions\s*:\s*\n([\s\S]*)',
-        caseSensitive: false,
-      ).firstMatch(recetteBrute);
-      if (insMatch != null) {
-        final insText = insMatch.group(1)!.trim();
-        produits = insText
-            .split('\n')
-            .map((e) => e.replaceAll(RegExp(r'^\d+[\.\)\s]+'), '').trim())
             .toList();
       }
 
@@ -910,6 +930,44 @@ class CalendrierEcran extends StatefulWidget {
 class _CalendrierEcranState extends State<CalendrierEcran> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
+  List<Map<String, dynamic>> produitsFiltres = [];
+
+  Future<void> _filtrerProduitsParDate(
+    DateTime dateDebut,
+    DateTime dateFin,
+  ) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('produits')
+        .get();
+    final produits = snapshot.docs.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      data['id'] = doc.id;
+      return data;
+    }).toList();
+
+    final List<Map<String, dynamic>> filtres = [];
+    for (var p in produits) {
+      final rawDate = p['date_de_peremption'];
+      DateTime? date;
+      if (rawDate is String && rawDate.isNotEmpty) {
+        try {
+          date = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
+        } catch (_) {
+          try {
+            date = DateTime.parse(rawDate);
+          } catch (_) {}
+        }
+      } else if (rawDate is Timestamp) {
+        date = rawDate.toDate();
+      }
+      if (date != null && !date.isBefore(dateDebut) && !date.isAfter(dateFin)) {
+        filtres.add(p);
+      }
+    }
+    setState(() {
+      produitsFiltres = filtres;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -925,33 +983,81 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: TableCalendar(
-          firstDay: DateTime.utc(2020, 1, 1),
-          lastDay: DateTime.utc(2030, 12, 31),
-          focusedDay: _focusedDay,
-          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-          onDaySelected: (selectedDay, focusedDay) {
-            setState(() {
-              _selectedDay = selectedDay;
-              _focusedDay = focusedDay;
-            });
-          },
-          calendarFormat: CalendarFormat.month,
-          startingDayOfWeek: StartingDayOfWeek.monday,
-          headerStyle: const HeaderStyle(
-            formatButtonVisible: false,
-            titleCentered: true,
-          ),
-          calendarStyle: CalendarStyle(
-            todayDecoration: BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
+        child: Column(
+          children: [
+            TableCalendar(
+              firstDay: DateTime.utc(2020, 1, 1),
+              lastDay: DateTime.utc(2030, 12, 31),
+              focusedDay: _focusedDay,
+              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              onDaySelected: (selectedDay, focusedDay) {
+                setState(() {
+                  _selectedDay = selectedDay;
+                  _focusedDay = focusedDay;
+                });
+                final now = DateTime.now();
+                final debut = DateTime(now.year, now.month, now.day);
+                final fin = DateTime(
+                  selectedDay.year,
+                  selectedDay.month,
+                  selectedDay.day,
+                );
+                if (fin.isBefore(debut)) {
+                  _filtrerProduitsParDate(fin, debut);
+                } else {
+                  _filtrerProduitsParDate(debut, fin);
+                }
+              },
+              calendarFormat: CalendarFormat.month,
+              startingDayOfWeek: StartingDayOfWeek.monday,
+              headerStyle: const HeaderStyle(
+                formatButtonVisible: false,
+                titleCentered: true,
+              ),
+              calendarStyle: CalendarStyle(
+                todayDecoration: BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                ),
+                selectedDecoration: BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                ),
+              ),
             ),
-            selectedDecoration: BoxDecoration(
-              color: Colors.orange,
-              shape: BoxShape.circle,
-            ),
-          ),
+            if (produitsFiltres.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              Text(
+                "Produits qui périment entre aujourd'hui et le ${DateFormat('dd/MM/yyyy').format(_selectedDay!)} :",
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: NeverScrollableScrollPhysics(),
+                itemCount: produitsFiltres.length,
+                itemBuilder: (context, index) {
+                  final p = produitsFiltres[index];
+                  return ListTile(
+                    leading: p['image'] != null
+                        ? Image.network(
+                            p['image'],
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                          )
+                        : const Icon(Icons.fastfood),
+                    title: Text(p['nom'] ?? ''),
+                    subtitle: Text(
+                      'Périme le ${p['date_de_peremption'] ?? ''}',
+                    ),
+                  );
+                },
+              ),
+            ] else if (_selectedDay != null) ...[
+              const SizedBox(height: 20),
+              const Text("Aucun produit ne périme à cette date."),
+            ],
+          ],
         ),
       ),
     );
