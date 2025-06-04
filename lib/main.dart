@@ -39,7 +39,25 @@ void main() async {
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
   );
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: (response) {},
+  );
+
+  if (Platform.isAndroid) {
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'expiration_channel',
+      'Expiration Notifications',
+      description: 'Notifications pour les produits proches de la péremption',
+      importance: Importance.high,
+    );
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(channel);
+  }
+
   await Firebase.initializeApp()
       .then((_) {
         runApp(const MonApp());
@@ -76,9 +94,7 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
     CalendrierEcran(),
     ListeCoursesEcran(),
     AccueilEcran(),
-    RecettesEcran(
-      produits: ['Eau de Source', 'Farine', 'Oeuf', 'Chocolat', 'Levure'],
-    ),
+    RecettesEcran(),
     ProfilEcran(),
   ];
 
@@ -103,7 +119,7 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
           BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Liste'),
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Accueil'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.menu_book),
+            icon: Icon(Icons.restaurant),
             label: 'Recettes',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
@@ -111,6 +127,18 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
       ),
     );
   }
+}
+
+class Course {
+  final String nom;
+  final bool achete;
+
+  Course({required this.nom, this.achete = false});
+
+  Map<String, dynamic> toMap() => {'nom': nom, 'achete': achete};
+
+  static Course fromMap(Map<String, dynamic> map) =>
+      Course(nom: map['nom'], achete: map['achete'] ?? false);
 }
 
 class AccueilEcran extends StatefulWidget {
@@ -123,6 +151,76 @@ class AccueilEcran extends StatefulWidget {
 class _AccueilEcranState extends State<AccueilEcran> {
   List<Map<String, dynamic>> produits = [];
 
+  @override
+  void initState() {
+    super.initState();
+    _verifierProduitsPerimesEtNotifer(); // Vérifier au démarrage
+  }
+
+  Future<void> _verifierProduitsPerimesEtNotifer() async {
+    final currentDate = DateTime.now();
+    final snapshot = await FirebaseFirestore.instance
+        .collection('produits')
+        .get();
+    final ingredientsExpiringSoon = <String>[];
+
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      final rawDate = data['date_de_peremption'];
+      DateTime? expirationDate;
+
+      if (rawDate is String && rawDate.isNotEmpty) {
+        try {
+          expirationDate = DateTime.parse(rawDate);
+        } catch (_) {
+          try {
+            expirationDate = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
+          } catch (_) {}
+        }
+      } else if (rawDate is Timestamp) {
+        expirationDate = rawDate.toDate();
+      }
+
+      if (expirationDate != null) {
+        final daysUntilExpiration = expirationDate
+            .difference(currentDate)
+            .inDays;
+        if (daysUntilExpiration <= 2 && daysUntilExpiration >= 0) {
+          if (data['nom'] != null && data['nom'].toString().isNotEmpty) {
+            ingredientsExpiringSoon.add(data['nom'].toString());
+          }
+        }
+      }
+    }
+
+    if (ingredientsExpiringSoon.isNotEmpty) {
+      final recipeGenerator = _RecettesEcranState();
+      final recettes = await recipeGenerator._genererRecette(
+        ingredientsExpiringSoon,
+      );
+
+      if (recettes.isNotEmpty && recettes[0].titre.isNotEmpty) {
+        final notificationDetails = const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'expiration_channel',
+            'Expiration Notifications',
+            channelDescription:
+                'Notifications pour les produits proches de la péremption',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        );
+
+        await flutterLocalNotificationsPlugin.show(
+          0,
+          'Produits proches de la péremption',
+          'Essayez cette recette : ${recettes[0].titre}',
+          notificationDetails,
+        );
+      }
+    }
+  }
+
   void _ajouterProduit(Map<String, dynamic> produit) {
     FirebaseFirestore.instance
         .collection('produits')
@@ -134,9 +232,24 @@ class _AccueilEcranState extends State<AccueilEcran> {
         })
         .then((value) {
           print("Produit ajouté avec ID : ${value.id}");
+          _verifierProduitsPerimesEtNotifer();
         })
         .catchError((error) {
           print("Erreur lors de l'ajout : $error");
+        });
+  }
+
+  void _ajouterListeDeCourses(Map<String, dynamic> produit) {
+    FirebaseFirestore.instance
+        .collection('courses')
+        .add({'nom': produit['name'], 'achete': false})
+        .then((value) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Ajouté à la liste de courses 🛒")),
+          );
+        })
+        .catchError((error) {
+          print("Erreur ajout liste de courses: $error");
         });
   }
 
@@ -174,11 +287,18 @@ class _AccueilEcranState extends State<AccueilEcran> {
             itemBuilder: (context, index) {
               final p = produits[index];
               final nom = p['nom'] ?? '';
-              final date = DateFormat(
-                'dd/MM/yyyy',
-              ).parse(p['date_de_peremption']);
+              DateTime? date;
+              try {
+                date = DateTime.parse(p['date_de_peremption']);
+              } catch (_) {
+                try {
+                  date = DateFormat(
+                    'dd/MM/yyyy',
+                  ).parse(p['date_de_peremption']);
+                } catch (_) {}
+              }
               final image = p['image'];
-              final estPerime = date.isBefore(DateTime.now());
+              final estPerime = date != null && date.isBefore(DateTime.now());
               final docId = p.id;
               return Card(
                 shape: RoundedRectangleBorder(
@@ -208,42 +328,69 @@ class _AccueilEcranState extends State<AccueilEcran> {
                     ),
                   ),
                   subtitle: Text(
-                    'Périme le ${DateFormat('dd/MM/yyyy').format(date)}',
+                    date != null
+                        ? 'Périme le ${DateFormat('dd/MM/yyyy').format(date)}'
+                        : 'Date invalide',
                     style: TextStyle(
                       color: estPerime ? Colors.red : Colors.grey[700],
                     ),
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () async {
-                      final confirmation = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('Supprimer le produit'),
-                          content: const Text(
-                            'Es-tu sûr de vouloir supprimer ce produit ?',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Non'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () async {
+                          final confirmation = await showDialog<bool>(
+                            context: context,
+                            builder: (_) => AlertDialog(
+                              title: const Text('Supprimer le produit'),
+                              content: const Text(
+                                'Es-tu sûr de vouloir supprimer ce produit ?',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Non'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Oui'),
+                                ),
+                              ],
                             ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Oui'),
-                            ),
-                          ],
-                        ),
-                      );
+                          );
 
-                      if (confirmation == true) {
-                        FirebaseFirestore.instance
-                            .collection('produits')
-                            .doc(docId)
-                            .delete();
-                      }
-                    },
+                          if (confirmation == true) {
+                            FirebaseFirestore.instance
+                                .collection('produits')
+                                .doc(docId)
+                                .delete();
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.add_shopping_cart,
+                          color: Colors.green,
+                        ),
+                        tooltip: "Ajouter à la liste de courses",
+                        onPressed: () {
+                          _ajouterListeDeCourses(nom);
+                        },
+                      ),
+                    ],
                   ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ResultatEcranScan(nomProduit: nom, imageUrl: image),
+                      ),
+                    );
+                  },
                 ),
               );
             },
@@ -353,127 +500,6 @@ class _ScanEcranState extends State<ScanEcran> {
     );
   }
 }
-
-/*class ResultatEcranScan extends StatefulWidget {
-    final String nomProduit; // Reçu depuis ScanEcran
-
-    const ResultatEcranScan({Key? key, required this.nomProduit})
-      : super(key: key);
-
-    @override
-    State<ResultatEcranScan> createState() => _ResultatEcranScanState();
-  }
-
-  class _ResultatEcranScanState extends State<ResultatEcranScan> {
-    final TextEditingController _dateController = TextEditingController();
-    File? _imageDate;
-    String _dateScannee = '';
-    DateTime? _selectedDate;
-
-    Future<void> _scanDatePeremption() async {
-      final pickedFile = await ImagePicker().pickImage(
-        source: ImageSource.camera,
-      );
-      if (pickedFile != null) {
-        final text = await TesseractOcr.extractText(pickedFile.path);
-        setState(() {
-          _imageDate = File(pickedFile.path);
-          _dateScannee = text;
-          _dateController.text = _extractDate(text);
-        });
-      }
-    }
-
-    String _extractDate(String text) {
-      // Exemple : chercher une date de type JJ/MM/AAAA ou similaire
-      final regex = RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})');
-      final match = regex.firstMatch(text);
-      return match != null ? match.group(0)! : text;
-    }
-
-    void _enregistrer() {
-    String dateStr = _dateController.text.trim();
-    if (dateStr.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Veuillez entrer ou scanner une date de péremption.')),
-      );
-      return;
-    }
-
-    try {
-      final date = DateFormat('dd/MM/yyyy').parseStrict(dateStr);
-      if (date.isBefore(DateTime.now())) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ce produit est déjà périmé !')),
-        );
-        return;
-      }
-
-      final produit = {
-        'name': widget.nomProduit,
-        'date': date,
-      };
-
-      Navigator.pop(context, produit);
-    } catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Date invalide. Veuillez corriger manuellement.')),
-      );
-    }
-  }
-
-    @override
-    void dispose() {
-      _dateController.dispose();
-      super.dispose();
-    }
-
-
-
-    @override
-    Widget build(BuildContext context) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Résultat du scan')),
-        body: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              Text(
-                'Produit : ${widget.nomProduit}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _dateController,
-                decoration: const InputDecoration(
-                  labelText: 'Date de péremption',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _scanDatePeremption,
-                icon: const Icon(Icons.camera_alt),
-                label: const Text('Scanner la date de péremption'),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _enregistrer,
-                child: const Text('Enregistrer le produit'),
-              ),
-              if (_imageDate != null) ...[
-                const SizedBox(height: 24),
-                const Text('Aperçu de l\'image scannée :'),
-                const SizedBox(height: 8),
-                Image.file(_imageDate!, height: 150),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-  }
-  */
 
 class ResultatEcranScan extends StatefulWidget {
   final String nomProduit;
@@ -659,15 +685,18 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
 
 class Recette {
   final String titre;
-  final List<String> produits;
+  final List<String> ingredients;
+  final List<String> instructions;
 
-  Recette({required this.titre, required this.produits});
+  Recette({
+    required this.titre,
+    required this.ingredients,
+    required this.instructions,
+  });
 }
 
 class RecettesEcran extends StatefulWidget {
-  final List<String> produits;
-
-  const RecettesEcran({Key? key, required this.produits}) : super(key: key);
+  const RecettesEcran({Key? key}) : super(key: key);
 
   @override
   State<RecettesEcran> createState() => _RecettesEcranState();
@@ -678,8 +707,8 @@ class _RecettesEcranState extends State<RecettesEcran> {
   bool isLoading = false;
   String? erreur;
 
-  // Ajoute ta clé API ici
-  static const String openAIApiKey = 'TON_API_KEY_ICI';
+  static const String openAIApiKey =
+      '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';
 
   @override
   void initState() {
@@ -695,19 +724,41 @@ class _RecettesEcranState extends State<RecettesEcran> {
     });
 
     try {
-      // Récupérer les ingrédients depuis Firestore (champ 'nom')
       final snapshot = await FirebaseFirestore.instance
           .collection('produits')
           .get();
 
-      final ingredients = snapshot.docs
-          .map((doc) => doc['nom']?.toString() ?? '')
-          .where((nom) => nom.isNotEmpty)
-          .toList();
+      final ingredients = <String>[];
+      final currentDate = DateTime.now();
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final rawDate = data['date_de_peremption'];
+        DateTime? expirationDate;
+
+        if (rawDate is String && rawDate.isNotEmpty) {
+          try {
+            expirationDate = DateTime.parse(rawDate);
+          } catch (_) {
+            try {
+              expirationDate = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
+            } catch (_) {}
+          }
+        } else if (rawDate is Timestamp) {
+          expirationDate = rawDate.toDate();
+        }
+
+        if (expirationDate != null &&
+            expirationDate.isAfter(currentDate) &&
+            data['nom'] != null &&
+            data['nom'].toString().isNotEmpty) {
+          ingredients.add(data['nom'].toString());
+        }
+      }
 
       if (ingredients.isEmpty) {
         setState(() {
-          erreur = "Aucun ingrédient trouvé dans la base de données.";
+          erreur = "Aucun ingrédient non périmé trouvé.";
           isLoading = false;
         });
         return;
@@ -722,30 +773,28 @@ class _RecettesEcranState extends State<RecettesEcran> {
     }
   }
 
-  Future<void> _genererRecette(List<String> ingredients) async {
+  Future<List<Recette>> _genererRecette(List<String> ingredients) async {
     final prompt =
-        "Je veux préparer plusieurs recettes avec ces ingrédients : ${ingredients.join(', ')}. "
-        "Propose-moi 20 recettes simples, faciles et rapides. "
-        "Donne le résultat au format suivant pour chaque recette :\n"
-        " Titre :<titre de la recette>\n"
-        "Ingrédients :\n- ingrédient 1\n- ingrédient 2\n...\n"
-        "Instructions :\n1. étape 1\n2. étape 2\n...\n\n"
-        "Sépare chaque recette par 'Titre :'.";
+        "Génère 3 recettes simples, rapides et en français utilisant uniquement ces ingrédients : ${ingredients.join(', ')}. "
+        "Pour chaque recette, donne :\n"
+        "- Titre : <titre de la recette>\n"
+        "- Ingrédients :\n  - <ingrédient 1>\n  - <ingrédient 2>\n  ...\n"
+        "- Instructions :\n  1. <étape 1>\n  2. <étape 2>\n  ...\n\n"
+        "Sépare chaque recette par '---'.";
 
     try {
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization':
-              'Bearer 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',
+          'Authorization': 'Bearer $openAIApiKey',
         },
         body: jsonEncode({
           'model': 'gpt-4o-mini',
           'messages': [
             {'role': 'user', 'content': prompt},
           ],
-          'max_tokens': 400,
+          'max_tokens': 1000,
           'temperature': 0.7,
         }),
       );
@@ -760,52 +809,79 @@ class _RecettesEcranState extends State<RecettesEcran> {
           recettes = parsedRecettes;
           isLoading = false;
         });
+        return parsedRecettes;
       } else {
         setState(() {
           erreur = "Erreur API : ${response.statusCode}";
           isLoading = false;
         });
+        return [];
       }
     } catch (e) {
       setState(() {
         erreur = "Erreur : $e";
         isLoading = false;
       });
+      return [];
     }
   }
 
   List<Recette> _parseRecettes(String texte) {
     final recettesParsed = <Recette>[];
 
-    final recettesBrutes = texte.split(
-      RegExp(r'\nTitre\s*:', caseSensitive: false),
-    );
+    final recettesBrutes = texte.split('---');
 
     for (var recetteBrute in recettesBrutes) {
       if (recetteBrute.trim().isEmpty) continue;
 
       String titre = '';
-      List<String> produits = [];
+      List<String> ingredients = [];
+      List<String> instructions = [];
 
-      final titreMatch = RegExp(r'^(.*)').firstMatch(recetteBrute.trim());
+      final titreMatch = RegExp(
+        r'Titre\s*:\s*(.*?)\n',
+        caseSensitive: false,
+      ).firstMatch(recetteBrute);
       if (titreMatch != null) {
         titre = titreMatch.group(1)!.trim();
       }
 
       final ingMatch = RegExp(
-        r'Ingrédients\s*:\s*\n([\s\S]*?)\n(?:Instructions|$)',
+        r'Ingrédients\s*:\s*\n([\s\S]*?)(?=\nInstructions\s*:|$)',
         caseSensitive: false,
       ).firstMatch(recetteBrute);
       if (ingMatch != null) {
         final ingText = ingMatch.group(1)!.trim();
-        produits = ingText
+        ingredients = ingText
             .split('\n')
             .map((e) => e.replaceAll(RegExp(r'^[-\d\.\)\s]+'), '').trim())
+            .where((e) => e.isNotEmpty)
             .toList();
       }
 
-      if (titre.isNotEmpty && produits.isNotEmpty) {
-        recettesParsed.add(Recette(titre: titre, produits: produits));
+      final instrMatch = RegExp(
+        r'Instructions\s*:\s*\n([\s\S]*?)(?=$|\n---)',
+        caseSensitive: false,
+      ).firstMatch(recetteBrute);
+      if (instrMatch != null) {
+        final instrText = instrMatch.group(1)!.trim();
+        instructions = instrText
+            .split('\n')
+            .map((e) => e.replaceAll(RegExp(r'^\d+\.\s*'), '').trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+
+      if (titre.isNotEmpty &&
+          ingredients.isNotEmpty &&
+          instructions.isNotEmpty) {
+        recettesParsed.add(
+          Recette(
+            titre: titre,
+            ingredients: ingredients,
+            instructions: instructions,
+          ),
+        );
       }
     }
 
@@ -816,7 +892,7 @@ class _RecettesEcranState extends State<RecettesEcran> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Recettes'),
+        title: const Text('Recettes'),
         actions: const [
           ProfilAvatarButton(
             photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
@@ -824,11 +900,11 @@ class _RecettesEcranState extends State<RecettesEcran> {
         ],
       ),
       body: isLoading
-          ? Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator())
           : erreur != null
           ? Center(child: Text(erreur!))
           : recettes == null || recettes!.isEmpty
-          ? Center(child: Text("Aucune recette générée."))
+          ? const Center(child: Text("Aucune recette générée."))
           : ListView.builder(
               itemCount: recettes!.length,
               itemBuilder: (context, index) {
@@ -847,18 +923,26 @@ class _RecettesEcranState extends State<RecettesEcran> {
                         children: [
                           Text(
                             recette.titre,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          SizedBox(height: 10),
-                          Text(
+                          const SizedBox(height: 10),
+                          const Text(
                             'Ingrédients :',
                             style: TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          ...recette.produits.map(
+                          ...recette.ingredients.map(
                             (ingredient) => Text('• $ingredient'),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Instructions :',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          ...recette.instructions.asMap().entries.map(
+                            (entry) => Text('${entry.key + 1}. ${entry.value}'),
                           ),
                         ],
                       ),
@@ -867,6 +951,10 @@ class _RecettesEcranState extends State<RecettesEcran> {
                 );
               },
             ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _chargerIngredientsEtGenererRecette,
+        child: const Icon(Icons.refresh),
+      ),
     );
   }
 }
@@ -879,52 +967,119 @@ class ListeCoursesEcran extends StatefulWidget {
 }
 
 class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
-  final List<String> items = [];
-  final Map<String, bool> completed = {};
-
-  @override
-  void initState() {
-    super.initState();
-    for (var item in items) {
-      completed[item] = false;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Liste de courses'),
-        foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-        actions: const [
-          ProfilAvatarButton(
-            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          for (var item in items)
-            CheckboxListTile(
-              title: Text(item),
-              value: completed[item],
-              onChanged: (val) {
-                setState(() {
-                  completed[item] = val!;
-                });
-              },
-            ),
-          const Divider(),
-          ElevatedButton(
-            onPressed: () {},
-            child: const Text('Voir les recettes associées'),
-          ),
-          ElevatedButton(
-            onPressed: () {},
-            child: const Text('Supprimer ce(s) produit(s)'),
-          ),
-        ],
+      appBar: AppBar(title: const Text('🛒 Liste de courses')),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('liste_courses')
+            .orderBy('ajoute_le', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Erreur de chargement'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final items = snapshot.data!.docs;
+
+          if (items.isEmpty) {
+            return const Center(child: Text('Ta liste est vide 🥲'));
+          }
+
+          return ListView.builder(
+            itemCount: items.length,
+            padding: const EdgeInsets.all(12),
+            itemBuilder: (context, index) {
+              final doc = items[index];
+              final nom = doc['nom'] ?? '';
+              DateTime? date;
+              try {
+                date = DateTime.parse(doc['date']);
+              } catch (_) {}
+              final image = doc['image'];
+              final achete = doc['achete'] ?? false;
+              final docId = doc.id;
+
+              return Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 4,
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                child: ListTile(
+                  leading: image != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            image,
+                            width: 50,
+                            height: 50,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : const Icon(Icons.shopping_cart),
+                  title: Text(
+                    nom,
+                    style: TextStyle(
+                      decoration: achete ? TextDecoration.lineThrough : null,
+                      color: achete ? Colors.grey : Colors.black,
+                    ),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (date != null)
+                        Text(
+                          'À consommer avant le ${DateFormat('dd/MM/yyyy').format(date)}',
+                        ),
+                      Text(
+                        achete ? '✅ Acheté' : '🕒 À acheter',
+                        style: TextStyle(
+                          color: achete ? Colors.green : Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          achete
+                              ? Icons.check_box
+                              : Icons.check_box_outline_blank,
+                          color: achete ? Colors.green : Colors.grey,
+                        ),
+                        tooltip: achete
+                            ? 'Marqué comme acheté'
+                            : 'Cocher comme acheté',
+                        onPressed: () {
+                          FirebaseFirestore.instance
+                              .collection('liste_courses')
+                              .doc(docId)
+                              .update({'achete': !achete});
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () {
+                          FirebaseFirestore.instance
+                              .collection('liste_courses')
+                              .doc(docId)
+                              .delete();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -1086,7 +1241,6 @@ class _ProfilEcranState extends State<ProfilEcran> {
   String email = "utilisateur@email.com";
   String photoUrl = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
-  // Fréquences de notification disponibles
   final Map<String, bool> frequences = {
     "Le jour même": false,
     "1 jour avant": false,
@@ -1137,7 +1291,6 @@ class _ProfilEcranState extends State<ProfilEcran> {
               label: const Text("Modifier le profil"),
             ),
             const SizedBox(height: 30),
-            // Paramétrage des notifications
             Card(
               elevation: 2,
               margin: const EdgeInsets.symmetric(vertical: 8),
@@ -1161,14 +1314,12 @@ class _ProfilEcranState extends State<ProfilEcran> {
                           setState(() {
                             frequences[freq] = val ?? false;
                           });
-                          // Ici, tu pourrais sauvegarder le choix dans Firestore ou localement
                         },
                       ),
                     ),
                     const SizedBox(height: 8),
                     ElevatedButton.icon(
                       onPressed: () {
-                        // Ici, tu pourrais sauvegarder les préférences dans Firestore ou localement
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text(
