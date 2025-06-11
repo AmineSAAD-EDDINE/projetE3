@@ -853,14 +853,23 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 
   String? _extractDate(String text) {
+    String cleaned = text.replaceAll(RegExp(r'[^0-9\/\-\.\s]'), '');
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), '');
+
     final List<RegExp> regexList = [
-      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})'),
-      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
-      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
+      RegExp(
+        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})',
+      ), // 12/06/2025 ou 12-06-2025 ou 12.06.2025
+      RegExp(
+        r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})',
+      ), // 2025/06/12 ou 2025-06-12 ou 2025.06.12
+      RegExp(
+        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})',
+      ), // 12/06/25 ou 12-06-25 ou 12.06.25
     ];
 
     for (var regex in regexList) {
-      final match = regex.firstMatch(text);
+      final match = regex.firstMatch(cleaned);
       if (match != null) {
         return match.group(0);
       }
