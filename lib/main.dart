@@ -11,6 +11,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 Future<void> creerFamille(String nomFamille) async {
   final user = FirebaseAuth.instance.currentUser;
@@ -28,6 +29,24 @@ Future<void> creerFamille(String nomFamille) async {
     {'familleId': familleId},
     SetOptions(merge: true),
   );
+}
+
+Future<String?> _importerEtUploaderPhoto() async {
+  final picker = ImagePicker();
+  final picked = await picker.pickImage(source: ImageSource.gallery);
+  if (picked == null) return null;
+
+  final file = File(picked.path);
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return null;
+
+  final ref = FirebaseStorage.instance
+      .ref()
+      .child('avatars')
+      .child('${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg');
+
+  await ref.putFile(file);
+  return await ref.getDownloadURL();
 }
 
 Future<String?> getFamilleId() async {
@@ -1222,8 +1241,8 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
                           ),
                         ],
                       ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.max,
                         children: [
                           IconButton(
                             icon: Icon(
@@ -1433,23 +1452,46 @@ class _ProfilEcranState extends State<ProfilEcran> {
     "1 semaine avant": false,
   };
 
+  late final TextEditingController nomController;
+
   @override
   void initState() {
     super.initState();
+    nomController = TextEditingController(text: nom);
     _chargerInfosUtilisateur();
+  }
+
+  void dispose() {
+    nomController.dispose();
+    super.dispose();
+  }
+
+  Future<void> enregistrerInfosUtilisateur({
+    required String nom,
+    required String email,
+    required String photoUrl,
+    String? familleId,
+    Map<String, bool>? notificationFrequences,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    await FirebaseFirestore.instance
+        .collection('utilisateurs')
+        .doc(user.uid)
+        .set({
+          'nom': nom,
+          'email': email,
+          'photoUrl': photoUrl,
+          if (familleId != null) 'familleId': familleId,
+          if (notificationFrequences != null)
+            'notification_frequences': notificationFrequences,
+        }, SetOptions(merge: true));
   }
 
   Future<void> _chargerInfosUtilisateur() async {
     final user = FirebaseAuth.instance.currentUser;
+    nomController.text = nom;
     if (user != null) {
-      setState(() {
-        nom = user.displayName ?? "Utilisateur";
-        email = user.email ?? "utilisateur@email.com";
-        photoUrl =
-            user.photoURL ??
-            "https://cdn-icons-png.flaticon.com/512/149/149071.png";
-      });
-
       final doc = await FirebaseFirestore.instance
           .collection('utilisateurs')
           .doc(user.uid)
@@ -1457,8 +1499,12 @@ class _ProfilEcranState extends State<ProfilEcran> {
       if (doc.exists) {
         final data = doc.data()!;
         setState(() {
-          nom = data['nom'] ?? nom;
-          photoUrl = data['photoUrl'] ?? photoUrl;
+          nom = data['nom'] ?? "Utilisateur";
+          email = data['email'] ?? user.email ?? "utilisateur@email.com";
+          photoUrl =
+              data['photoUrl'] ??
+              user.photoURL ??
+              "https://cdn-icons-png.flaticon.com/512/149/149071.png";
           familleId = data['familleId'];
           if (data['notification_frequences'] != null) {
             final notif = Map<String, dynamic>.from(
@@ -1511,8 +1557,111 @@ class _ProfilEcranState extends State<ProfilEcran> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            CircleAvatar(radius: 50, backgroundImage: NetworkImage(photoUrl)),
-            const SizedBox(height: 20),
+            Center(
+              child: Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                margin: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 24,
+                    horizontal: 16,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          CircleAvatar(
+                            radius: 50,
+                            backgroundImage: NetworkImage(photoUrl),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.camera_alt,
+                              color: Colors.blue,
+                            ),
+                            onPressed: () async {
+                              final url = await _importerEtUploaderPhoto();
+                              if (url != null) {
+                                setState(() {
+                                  photoUrl = url;
+                                });
+                                await enregistrerInfosUtilisateur(
+                                  nom: nom,
+                                  email: email,
+                                  photoUrl: url,
+                                  familleId: familleId,
+                                  notificationFrequences: frequences,
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      "Photo de profil mise à jour !",
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: nomController,
+                        textAlign: TextAlign.center,
+                        decoration: const InputDecoration(
+                          labelText: "Nom d'utilisateur",
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        onChanged: (val) {
+                          setState(() {
+                            nom = val;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.save),
+                        label: const Text("Enregistrer le profil"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size.fromHeight(40),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () async {
+                          await enregistrerInfosUtilisateur(
+                            nom: nomController.text.trim(),
+                            email: email,
+                            photoUrl: photoUrl,
+                            familleId: familleId,
+                            notificationFrequences: frequences,
+                          );
+                          setState(() {
+                            nom = nomController.text.trim();
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Profil mis à jour !"),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             Text(
               nom,
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
