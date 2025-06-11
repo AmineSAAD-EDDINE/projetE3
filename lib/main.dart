@@ -382,23 +382,36 @@ class _AccueilEcranState extends State<AccueilEcran> {
       );
       return;
     }
-    FirebaseFirestore.instance
+
+    final produitsRef = FirebaseFirestore.instance
         .collection('familles')
         .doc(familleId)
-        .collection('produits')
-        .add({
-          'nom': produit['name'],
-          'date_de_peremption': produit['date'].toIso8601String(),
-          'ajoute_le': Timestamp.now().toString(),
-          'image': produit['imageUrl'],
-        })
-        .then((value) {
-          print("Produit ajouté avec ID : ${value.id}");
-          _verifierProduitsPerimesEtNotifer();
-        })
-        .catchError((error) {
-          print("Erreur lors de l'ajout : $error");
-        });
+        .collection('produits');
+
+    final query = await produitsRef
+        .where('nom', isEqualTo: produit['name'])
+        .where(
+          'date_de_peremption',
+          isEqualTo: produit['date'].toIso8601String(),
+        )
+        .limit(1)
+        .get();
+
+    if (query.docs.isNotEmpty) {
+      // Produit déjà existant : on incrémente la quantité
+      final doc = query.docs.first;
+      final quantite = (doc['quantite'] ?? 1) + 1;
+      await doc.reference.update({'quantite': quantite});
+    } else {
+      // Nouveau produit
+      await produitsRef.add({
+        'nom': produit['name'],
+        'date_de_peremption': produit['date'].toIso8601String(),
+        'ajoute_le': Timestamp.now().toString(),
+        'image': produit['imageUrl'],
+        'quantite': 1,
+      });
+    }
   }
 
   Future<void> _ajouterListeDeCourses(String nomProduit) async {
@@ -413,7 +426,11 @@ class _AccueilEcranState extends State<AccueilEcran> {
         .collection('familles')
         .doc(familleId)
         .collection('courses')
-        .add({'nom': nomProduit, 'achete': false})
+        .add({
+          'nom': nomProduit,
+          'achete': false,
+          'date': DateTime.now().toIso8601String(),
+        })
         .then((value) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Ajouté à la liste de courses 🛒")),
@@ -436,146 +453,225 @@ class _AccueilEcranState extends State<AccueilEcran> {
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('produits')
-            .orderBy('date_de_peremption')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(child: Text('Erreur de chargement.'));
-          }
-
-          if (!snapshot.hasData) {
+      body: FutureBuilder<String?>(
+        future: getFamilleId(),
+        builder: (context, familleSnapshot) {
+          if (!familleSnapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          final produits = snapshot.data!.docs;
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: produits.length,
-            itemBuilder: (context, index) {
-              final p = produits[index];
-              final nom = p['nom'] ?? '';
-              DateTime? date;
-              try {
-                date = DateTime.parse(p['date_de_peremption']);
-              } catch (_) {
-                try {
-                  date = DateFormat(
-                    'dd/MM/yyyy',
-                  ).parse(p['date_de_peremption']);
-                } catch (_) {}
+          final familleId = familleSnapshot.data;
+          if (familleId == null) {
+            return const Center(
+              child: Text("Aucune famille associée à ce compte."),
+            );
+          }
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('familles')
+                .doc(familleId)
+                .collection('produits')
+                .orderBy('date_de_peremption')
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Center(child: Text('Erreur de chargement.'));
               }
-              final image = p['image'];
-              final estPerime = date != null && date.isBefore(DateTime.now());
-              final docId = p.id;
-              return Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                color: estPerime ? Colors.red[50] : Colors.white,
-                elevation: 4,
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(12),
-                  leading: image != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            image,
-                            width: 60,
-                            height: 60,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : const Icon(Icons.fastfood, size: 40),
-                  title: Text(
-                    nom,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: estPerime ? Colors.red : Colors.black,
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final produits = snapshot.data!.docs;
+              return ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: produits.length,
+                itemBuilder: (context, index) {
+                  final p = produits[index];
+                  final nom = p['nom'] ?? '';
+                  DateTime? date;
+                  try {
+                    date = DateTime.parse(p['date_de_peremption']);
+                  } catch (_) {
+                    try {
+                      date = DateFormat(
+                        'dd/MM/yyyy',
+                      ).parse(p['date_de_peremption']);
+                    } catch (_) {}
+                  }
+                  final image = p['image'];
+                  final estPerime =
+                      date != null && date.isBefore(DateTime.now());
+                  final docId = p.id;
+                  return Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ),
-                  subtitle: Text(
-                    date != null
-                        ? 'Périme le ${DateFormat('dd/MM/yyyy').format(date)}'
-                        : 'Date invalide',
-                    style: TextStyle(
-                      color: estPerime ? Colors.red : Colors.grey[700],
-                    ),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () async {
-                          final confirmation = await showDialog<bool>(
-                            context: context,
-                            builder: (_) => AlertDialog(
-                              title: const Text('Supprimer le produit'),
-                              content: const Text(
-                                'Es-tu sûr de vouloir supprimer ce produit ?',
+                    color: estPerime ? Colors.red[50] : Colors.white,
+                    elevation: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(12),
+                      leading: image != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                image,
+                                width: 60,
+                                height: 60,
+                                fit: BoxFit.cover,
                               ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, false),
-                                  child: const Text('Non'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Oui'),
-                                ),
-                              ],
-                            ),
-                          );
-
-                          if (confirmation == true) {
-                            final familleId = await getFamilleId();
-                            if (familleId == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    "Aucune famille associée à ce compte.",
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            await FirebaseFirestore.instance
-                                .collection('familles')
-                                .doc(familleId)
-                                .collection('produits')
-                                .doc(docId)
-                                .delete();
-                          }
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.add_shopping_cart,
-                          color: Colors.green,
+                            )
+                          : const Icon(Icons.fastfood, size: 40),
+                      title: Text(
+                        (p['quantite'] ?? 1) > 1
+                            ? "$nom (x${p['quantite']})"
+                            : nom,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: estPerime ? Colors.red : Colors.black,
                         ),
-                        tooltip: "Ajouter à la liste de courses",
-                        onPressed: () {
-                          _ajouterListeDeCourses(nom);
-                        },
                       ),
-                    ],
-                  ),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ResultatEcranScan(nomProduit: nom, imageUrl: image),
+                      subtitle: Text(
+                        date != null
+                            ? 'Périme le ${DateFormat('dd/MM/yyyy').format(date)}'
+                            : 'Date invalide',
+                        style: TextStyle(
+                          color: estPerime ? Colors.red : Colors.grey[700],
+                        ),
                       ),
-                    );
-                  },
-                ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () async {
+                              final quantite = (p['quantite'] ?? 1) as int;
+                              if (quantite > 1) {
+                                int nbASupprimer = 1;
+                                final maxValue = quantite;
+                                final result = await showDialog<int>(
+                                  context: context,
+                                  builder: (context) {
+                                    return StatefulBuilder(
+                                      builder: (context, setState) => AlertDialog(
+                                        title: const Text(
+                                          'Supprimer des unités',
+                                        ),
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              'Vous avez $quantite produits.',
+                                            ),
+                                            const SizedBox(height: 12),
+                                            Row(
+                                              children: [
+                                                const Text(
+                                                  'Quantité à supprimer : ',
+                                                ),
+                                                Expanded(
+                                                  child: Slider(
+                                                    value: nbASupprimer
+                                                        .toDouble(),
+                                                    min: 1,
+                                                    max: maxValue.toDouble(),
+                                                    divisions: maxValue - 1,
+                                                    label: '$nbASupprimer',
+                                                    onChanged:
+                                                        (double newValue) {
+                                                          setState(() {
+                                                            nbASupprimer =
+                                                                newValue
+                                                                    .round();
+                                                          });
+                                                        },
+                                                  ),
+                                                ),
+                                                Text('$nbASupprimer'),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, null),
+                                            child: const Text('Annuler'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(
+                                              context,
+                                              nbASupprimer,
+                                            ),
+                                            child: const Text('Supprimer'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                );
+                                if (result != null) {
+                                  if (result >= quantite) {
+                                    final familleId = await getFamilleId();
+                                    if (familleId != null) {
+                                      await FirebaseFirestore.instance
+                                          .collection('familles')
+                                          .doc(familleId)
+                                          .collection('produits')
+                                          .doc(p.id)
+                                          .delete();
+                                    }
+                                  } else {
+                                    final familleId = await getFamilleId();
+                                    if (familleId != null) {
+                                      await FirebaseFirestore.instance
+                                          .collection('familles')
+                                          .doc(familleId)
+                                          .collection('produits')
+                                          .doc(p.id)
+                                          .update({
+                                            'quantite': quantite - result,
+                                          });
+                                    }
+                                  }
+                                }
+                              } else {
+                                final familleId = await getFamilleId();
+                                if (familleId != null) {
+                                  await FirebaseFirestore.instance
+                                      .collection('familles')
+                                      .doc(familleId)
+                                      .collection('produits')
+                                      .doc(p.id)
+                                      .delete();
+                                }
+                              }
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.add_shopping_cart,
+                              color: Colors.green,
+                            ),
+                            tooltip: "Ajouter à la liste de courses",
+                            onPressed: () {
+                              _ajouterListeDeCourses(nom);
+                            },
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ResultatEcranScan(
+                              nomProduit: nom,
+                              imageUrl: image,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
               );
             },
           );
@@ -611,6 +707,7 @@ class ProduitInfo {
 
 class _ScanEcranState extends State<ScanEcran> {
   String codeBarres = '';
+  final TextEditingController codeBarresController = TextEditingController();
 
   Future<void> _scannerCodeBarres() async {
     try {
@@ -633,6 +730,7 @@ class _ScanEcranState extends State<ScanEcran> {
             builder: (_) => ResultatEcranScan(
               nomProduit: produitInfo.nom,
               imageUrl: produitInfo.imageUrl,
+              codeBarres: codeBarres,
             ),
           ),
         );
@@ -675,10 +773,45 @@ class _ScanEcranState extends State<ScanEcran> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Scan Code-Barres')),
-      body: Center(
-        child: ElevatedButton(
-          onPressed: _scannerCodeBarres,
-          child: const Text('Scanner un code-barres'),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              controller: codeBarresController,
+              decoration: const InputDecoration(
+                labelText: 'Code-barres',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+              onChanged: (val) => codeBarres = val,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () async {
+                if (codeBarresController.text.trim().isNotEmpty) {
+                  final produitInfo = await _infoDepuisCodeBarres(
+                    codeBarresController.text.trim(),
+                  );
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ResultatEcranScan(
+                        nomProduit: produitInfo.nom,
+                        imageUrl: produitInfo.imageUrl,
+                        codeBarres: codeBarresController.text
+                            .trim(), // <-- Ajoute ceci
+                      ),
+                    ),
+                  );
+                } else {
+                  await _scannerCodeBarres();
+                }
+              },
+              child: const Text('Scanner ou valider le code-barres'),
+            ),
+          ],
         ),
       ),
     );
@@ -688,9 +821,14 @@ class _ScanEcranState extends State<ScanEcran> {
 class ResultatEcranScan extends StatefulWidget {
   final String nomProduit;
   final String? imageUrl;
+  final String? codeBarres;
 
-  const ResultatEcranScan({Key? key, required this.nomProduit, this.imageUrl})
-    : super(key: key);
+  const ResultatEcranScan({
+    Key? key,
+    required this.nomProduit,
+    this.imageUrl,
+    this.codeBarres,
+  }) : super(key: key);
 
   @override
   State<ResultatEcranScan> createState() => _ResultatEcranScanState();
@@ -698,6 +836,7 @@ class ResultatEcranScan extends StatefulWidget {
 
 class _ResultatEcranScanState extends State<ResultatEcranScan> {
   final TextEditingController _dateController = TextEditingController();
+  final TextEditingController _codeBarresController = TextEditingController();
   File? _imageDate;
   String _texteReconnu = '';
   DateTime? _selectedDate;
@@ -792,8 +931,16 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.codeBarres != null && widget.codeBarres!.isNotEmpty) {
+      _codeBarresController.text = widget.codeBarres!;
+    }
+  }
+
   void dispose() {
     _dateController.dispose();
+    _codeBarresController.dispose();
     super.dispose();
   }
 
@@ -1168,7 +1315,7 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
       body: FutureBuilder<String?>(
         future: getFamilleId(),
         builder: (context, familleSnapshot) {
-          if (familleSnapshot.connectionState != ConnectionState.done) {
+          if (familleSnapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           final familleId = familleSnapshot.data;
