@@ -999,12 +999,12 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
               const SizedBox(height: 8),
               Image.file(_imageDate!, height: 150),
             ],
-            if (_texteReconnu.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              const Text('Texte reconnu par OCR :'),
-              const SizedBox(height: 8),
-              Text(_texteReconnu),
-            ],
+            // if (_texteReconnu.isNotEmpty) ...[
+            //   const SizedBox(height: 20),
+            //   const Text('Texte reconnu par OCR :'),
+            //   const SizedBox(height: 8),
+            //   Text(_texteReconnu),
+            // ],
           ],
         ),
       ),
