@@ -658,17 +658,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
                           ),
                         ],
                       ),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ResultatEcranScan(
-                              nomProduit: nom,
-                              imageUrl: image,
-                            ),
-                          ),
-                        );
-                      },
                     ),
                   );
                 },
@@ -1451,7 +1440,11 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
     DateTime dateDebut,
     DateTime dateFin,
   ) async {
+    final familleId = await getFamilleId();
+    if (familleId == null) return;
     final snapshot = await FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
         .collection('produits')
         .get();
     final produits = snapshot.docs.map((doc) {
@@ -1501,7 +1494,7 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
         child: Column(
           children: [
             TableCalendar(
-              firstDay: DateTime.utc(2020, 1, 1),
+              firstDay: DateTime.now(),
               lastDay: DateTime.utc(2030, 12, 31),
               focusedDay: _focusedDay,
               selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
