@@ -10,9 +10,129 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+Future<void> creerFamille(String nomFamille) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+
+  final familleRef = FirebaseFirestore.instance.collection('familles').doc();
+  final familleId = familleRef.id;
+
+  await familleRef.set({
+    'nom': nomFamille,
+    'membres': [user.uid],
+  });
+
+  await FirebaseFirestore.instance.collection('utilisateurs').doc(user.uid).set(
+    {'familleId': familleId},
+    SetOptions(merge: true),
+  );
+}
+
+Future<String?> getFamilleId() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return null;
+  final userDoc = await FirebaseFirestore.instance
+      .collection('utilisateurs')
+      .doc(user.uid)
+      .get();
+  return userDoc.data()?['familleId'];
+}
+
+Future<bool> rejoindreFamille(String familleId) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return false;
+
+  final familleRef = FirebaseFirestore.instance
+      .collection('familles')
+      .doc(familleId);
+  final doc = await familleRef.get();
+  if (!doc.exists) return false;
+
+  await familleRef.update({
+    'membres': FieldValue.arrayUnion([user.uid]),
+  });
+
+  await FirebaseFirestore.instance.collection('utilisateurs').doc(user.uid).set(
+    {'familleId': familleId},
+    SetOptions(merge: true),
+  );
+
+  return true;
+}
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+
+class LoginEcran extends StatefulWidget {
+  @override
+  State<LoginEcran> createState() => _LoginEcranState();
+}
+
+class _LoginEcranState extends State<LoginEcran> {
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+  bool isLogin = true;
+  String error = '';
+
+  Future<void> _submit() async {
+    try {
+      if (isLogin) {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: emailController.text.trim(),
+          password: passwordController.text.trim(),
+        );
+      } else {
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: emailController.text.trim(),
+          password: passwordController.text.trim(),
+        );
+      }
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } catch (e) {
+      setState(() {
+        error = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(isLogin ? 'Connexion' : 'Inscription')),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            TextField(
+              controller: emailController,
+              decoration: InputDecoration(labelText: 'Email'),
+            ),
+            TextField(
+              controller: passwordController,
+              decoration: InputDecoration(labelText: 'Mot de passe'),
+              obscureText: true,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _submit,
+              child: Text(isLogin ? 'Se connecter' : 'S’inscrire'),
+            ),
+            TextButton(
+              onPressed: () => setState(() => isLogin = !isLogin),
+              child: Text(isLogin ? 'Créer un compte' : 'J’ai déjà un compte'),
+            ),
+            if (error.isNotEmpty)
+              Text(error, style: TextStyle(color: Colors.red)),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class ProfilAvatarButton extends StatelessWidget {
   final String photoUrl;
@@ -73,9 +193,18 @@ class MonApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Anti-Gaspillage',
-      theme: ThemeData(primarySwatch: Colors.green),
-      home: const EcranPrincipal(),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return CircularProgressIndicator();
+          }
+          if (snapshot.hasData) {
+            return EcranPrincipal();
+          }
+          return LoginEcran();
+        },
+      ),
     );
   }
 }
@@ -154,12 +283,17 @@ class _AccueilEcranState extends State<AccueilEcran> {
   @override
   void initState() {
     super.initState();
-    _verifierProduitsPerimesEtNotifer(); // Vérifier au démarrage
+    _verifierProduitsPerimesEtNotifer();
   }
 
   Future<void> _verifierProduitsPerimesEtNotifer() async {
+    final familleId = await getFamilleId();
+    if (familleId == null) return;
+
     final currentDate = DateTime.now();
     final snapshot = await FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
         .collection('produits')
         .get();
     final ingredientsExpiringSoon = <String>[];
@@ -221,8 +355,17 @@ class _AccueilEcranState extends State<AccueilEcran> {
     }
   }
 
-  void _ajouterProduit(Map<String, dynamic> produit) {
+  Future<void> _ajouterProduit(Map<String, dynamic> produit) async {
+    final familleId = await getFamilleId();
+    if (familleId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Aucune famille associée à ce compte.")),
+      );
+      return;
+    }
     FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
         .collection('produits')
         .add({
           'nom': produit['name'],
@@ -239,10 +382,19 @@ class _AccueilEcranState extends State<AccueilEcran> {
         });
   }
 
-  void _ajouterListeDeCourses(Map<String, dynamic> produit) {
+  Future<void> _ajouterListeDeCourses(String nomProduit) async {
+    final familleId = await getFamilleId();
+    if (familleId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Aucune famille associée à ce compte.")),
+      );
+      return;
+    }
     FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
         .collection('courses')
-        .add({'nom': produit['name'], 'achete': false})
+        .add({'nom': nomProduit, 'achete': false})
         .then((value) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Ajouté à la liste de courses 🛒")),
@@ -363,7 +515,20 @@ class _AccueilEcranState extends State<AccueilEcran> {
                           );
 
                           if (confirmation == true) {
-                            FirebaseFirestore.instance
+                            final familleId = await getFamilleId();
+                            if (familleId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    "Aucune famille associée à ce compte.",
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            await FirebaseFirestore.instance
+                                .collection('familles')
+                                .doc(familleId)
                                 .collection('produits')
                                 .doc(docId)
                                 .delete();
@@ -724,7 +889,17 @@ class _RecettesEcranState extends State<RecettesEcran> {
     });
 
     try {
+      final familleId = await getFamilleId();
+      if (familleId == null) {
+        setState(() {
+          erreur = "Aucune famille associée à ce compte.";
+          isLoading = false;
+        });
+        return;
+      }
       final snapshot = await FirebaseFirestore.instance
+          .collection('familles')
+          .doc(familleId)
           .collection('produits')
           .get();
 
@@ -971,111 +1146,120 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('🛒 Liste de courses')),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('liste_courses')
-            .orderBy('ajoute_le', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(child: Text('Erreur de chargement'));
-          }
-          if (!snapshot.hasData) {
+      body: FutureBuilder<String?>(
+        future: getFamilleId(),
+        builder: (context, familleSnapshot) {
+          if (familleSnapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          final items = snapshot.data!.docs;
-
-          if (items.isEmpty) {
-            return const Center(child: Text('Ta liste est vide 🥲'));
+          final familleId = familleSnapshot.data;
+          if (familleId == null) {
+            return const Center(
+              child: Text("Aucune famille associée à ce compte."),
+            );
           }
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('familles')
+                .doc(familleId)
+                .collection('courses')
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Center(child: Text('Erreur de chargement'));
+              }
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-          return ListView.builder(
-            itemCount: items.length,
-            padding: const EdgeInsets.all(12),
-            itemBuilder: (context, index) {
-              final doc = items[index];
-              final nom = doc['nom'] ?? '';
-              DateTime? date;
-              try {
-                date = DateTime.parse(doc['date']);
-              } catch (_) {}
-              final image = doc['image'];
-              final achete = doc['achete'] ?? false;
-              final docId = doc.id;
+              final items = snapshot.data!.docs;
 
-              return Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 4,
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: ListTile(
-                  leading: image != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            image,
-                            width: 50,
-                            height: 50,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : const Icon(Icons.shopping_cart),
-                  title: Text(
-                    nom,
-                    style: TextStyle(
-                      decoration: achete ? TextDecoration.lineThrough : null,
-                      color: achete ? Colors.grey : Colors.black,
+              if (items.isEmpty) {
+                return const Center(child: Text('Ta liste est vide 🥲'));
+              }
+
+              return ListView.builder(
+                itemCount: items.length,
+                padding: const EdgeInsets.all(12),
+                itemBuilder: (context, index) {
+                  final doc = items[index];
+                  final nom = doc['nom'] ?? '';
+                  DateTime? date;
+                  try {
+                    date = DateTime.parse(doc['date']);
+                  } catch (_) {}
+                  final achete = doc['achete'] ?? false;
+                  final docId = doc.id;
+
+                  return Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (date != null)
-                        Text(
-                          'À consommer avant le ${DateFormat('dd/MM/yyyy').format(date)}',
-                        ),
-                      Text(
-                        achete ? '✅ Acheté' : '🕒 À acheter',
+                    elevation: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListTile(
+                      title: Text(
+                        nom,
                         style: TextStyle(
-                          color: achete ? Colors.green : Colors.orange,
+                          decoration: achete
+                              ? TextDecoration.lineThrough
+                              : null,
+                          color: achete ? Colors.grey : Colors.black,
                         ),
                       ),
-                    ],
-                  ),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        icon: Icon(
-                          achete
-                              ? Icons.check_box
-                              : Icons.check_box_outline_blank,
-                          color: achete ? Colors.green : Colors.grey,
-                        ),
-                        tooltip: achete
-                            ? 'Marqué comme acheté'
-                            : 'Cocher comme acheté',
-                        onPressed: () {
-                          FirebaseFirestore.instance
-                              .collection('liste_courses')
-                              .doc(docId)
-                              .update({'achete': !achete});
-                        },
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (date != null)
+                            Text(
+                              'À consommer avant le ${DateFormat('dd/MM/yyyy').format(date)}',
+                            ),
+                          Text(
+                            achete ? '✅ Acheté' : '🕒 À acheter',
+                            style: TextStyle(
+                              color: achete ? Colors.green : Colors.orange,
+                            ),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () {
-                          FirebaseFirestore.instance
-                              .collection('liste_courses')
-                              .doc(docId)
-                              .delete();
-                        },
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              achete
+                                  ? Icons.check_box
+                                  : Icons.check_box_outline_blank,
+                              color: achete ? Colors.green : Colors.grey,
+                            ),
+                            tooltip: achete
+                                ? 'Marqué comme acheté'
+                                : 'Cocher comme acheté',
+                            onPressed: () {
+                              FirebaseFirestore.instance
+                                  .collection('familles')
+                                  .doc(familleId)
+                                  .collection('courses')
+                                  .doc(docId)
+                                  .update({'achete': !achete});
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              FirebaseFirestore.instance
+                                  .collection('familles')
+                                  .doc(familleId)
+                                  .collection('courses')
+                                  .doc(docId)
+                                  .delete();
+                            },
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
+                    ),
+                  );
+                },
               );
             },
           );
@@ -1240,6 +1424,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
   String nom = "Utilisateur";
   String email = "utilisateur@email.com";
   String photoUrl = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+  String? familleId;
 
   final Map<String, bool> frequences = {
     "Le jour même": false,
@@ -1249,6 +1434,75 @@ class _ProfilEcranState extends State<ProfilEcran> {
   };
 
   @override
+  void initState() {
+    super.initState();
+    _chargerInfosUtilisateur();
+  }
+
+  Future<void> _chargerInfosUtilisateur() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      setState(() {
+        nom = user.displayName ?? "Utilisateur";
+        email = user.email ?? "utilisateur@email.com";
+        photoUrl =
+            user.photoURL ??
+            "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+      });
+
+      final doc = await FirebaseFirestore.instance
+          .collection('utilisateurs')
+          .doc(user.uid)
+          .get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        setState(() {
+          nom = data['nom'] ?? nom;
+          photoUrl = data['photoUrl'] ?? photoUrl;
+          familleId = data['familleId'];
+          if (data['notification_frequences'] != null) {
+            final notif = Map<String, dynamic>.from(
+              data['notification_frequences'],
+            );
+            notif.forEach((key, value) {
+              if (frequences.containsKey(key)) {
+                frequences[key] = value == true;
+              }
+            });
+          }
+        });
+      }
+    }
+  }
+
+  Future<String?> _demanderFamilleId(BuildContext context) async {
+    String code = '';
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rejoindre une famille'),
+        content: TextField(
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Code famille',
+            hintText: 'Entrez le code famille',
+          ),
+          onChanged: (value) => code = value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, code),
+            child: const Text('Rejoindre'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
@@ -1268,28 +1522,15 @@ class _ProfilEcranState extends State<ProfilEcran> {
               email,
               style: const TextStyle(fontSize: 16, color: Colors.grey),
             ),
+            if (familleId != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  "Code famille : $familleId",
+                  style: const TextStyle(fontSize: 16, color: Colors.blueGrey),
+                ),
+              ),
             const SizedBox(height: 30),
-            ElevatedButton.icon(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text("À venir"),
-                    content: const Text(
-                      "Fonctionnalité de modification du profil bientôt disponible.",
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text("OK"),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              icon: const Icon(Icons.edit),
-              label: const Text("Modifier le profil"),
-            ),
             const SizedBox(height: 30),
             Card(
               elevation: 2,
@@ -1319,17 +1560,97 @@ class _ProfilEcranState extends State<ProfilEcran> {
                     ),
                     const SizedBox(height: 8),
                     ElevatedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              "Préférences de notifications enregistrées.",
+                      onPressed: () async {
+                        final user = FirebaseAuth.instance.currentUser;
+                        if (user != null) {
+                          await FirebaseFirestore.instance
+                              .collection('utilisateurs')
+                              .doc(user.uid)
+                              .set({
+                                'notification_frequences': frequences,
+                              }, SetOptions(merge: true));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Préférences de notifications enregistrées.",
+                              ),
                             ),
-                          ),
-                        );
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Utilisateur non connecté."),
+                            ),
+                          );
+                        }
                       },
                       icon: const Icon(Icons.notifications_active),
                       label: const Text("Enregistrer"),
+                    ),
+                    ElevatedButton(
+                      onPressed: familleId != null
+                          ? null
+                          : () async {
+                              final nomCtrl = TextEditingController();
+                              final nom = await showDialog<String>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text("Nom de la famille"),
+                                  content: TextField(
+                                    controller: nomCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: "Nom de la famille",
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text("Annuler"),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(
+                                        context,
+                                        nomCtrl.text.trim(),
+                                      ),
+                                      child: const Text("Créer"),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (nom != null && nom.isNotEmpty) {
+                                await creerFamille(nom);
+                                await _chargerInfosUtilisateur();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text("Famille créée !"),
+                                  ),
+                                );
+                              }
+                            },
+                      child: Text(
+                        familleId != null
+                            ? "Famille déjà créée"
+                            : "Créer une famille",
+                      ),
+                    ),
+
+                    ElevatedButton(
+                      onPressed: () async {
+                        final familleId = await _demanderFamilleId(context);
+                        if (familleId != null && familleId.isNotEmpty) {
+                          final ok = await rejoindreFamille(familleId);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok
+                                    ? "Famille rejointe !"
+                                    : "Famille introuvable",
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text("Rejoindre une famille"),
                     ),
                   ],
                 ),
@@ -1337,12 +1658,8 @@ class _ProfilEcranState extends State<ProfilEcran> {
             ),
             const SizedBox(height: 30),
             ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Déconnexion... (à implémenter)"),
-                  ),
-                );
+              onPressed: () async {
+                await FirebaseAuth.instance.signOut();
               },
               icon: const Icon(Icons.logout),
               label: const Text("Se déconnecter"),
