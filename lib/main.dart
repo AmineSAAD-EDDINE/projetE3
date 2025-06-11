@@ -12,6 +12,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 
 Future<void> creerFamille(String nomFamille) async {
   final user = FirebaseAuth.instance.currentUser;
@@ -79,6 +81,47 @@ Future<bool> rejoindreFamille(String familleId) async {
   );
 
   return true;
+}
+
+Future<void> reprogrammerNotificationsPourTousLesProduits(
+  Map<String, bool> nouvellesFrequences,
+) async {
+  final familleId = await getFamilleId();
+  if (familleId == null) return;
+
+  final snapshot = await FirebaseFirestore.instance
+      .collection('familles')
+      .doc(familleId)
+      .collection('produits')
+      .get();
+
+  // Annule toutes les notifications programmées
+  await flutterLocalNotificationsPlugin.cancelAll();
+
+  for (var doc in snapshot.docs) {
+    final data = doc.data();
+    final nom = data['nom'];
+    final rawDate = data['date_de_peremption'];
+    DateTime? date;
+    if (rawDate is String && rawDate.isNotEmpty) {
+      try {
+        date = DateTime.parse(rawDate);
+      } catch (_) {
+        try {
+          date = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
+        } catch (_) {}
+      }
+    } else if (rawDate is Timestamp) {
+      date = rawDate.toDate();
+    }
+    if (nom != null && date != null) {
+      await planifierNotificationProduit(
+        produitNom: nom,
+        datePeremption: date,
+        frequences: nouvellesFrequences,
+      );
+    }
+  }
 }
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -196,6 +239,7 @@ void main() async {
         >()
         ?.createNotificationChannel(channel);
   }
+  tz.initializeTimeZones();
 
   await Firebase.initializeApp()
       .then((_) {
@@ -204,6 +248,48 @@ void main() async {
       .catchError((error) {
         print("Erreur lors de l'initialisation de Firebase : $error");
       });
+}
+
+Future<void> planifierNotificationProduit({
+  required String produitNom,
+  required DateTime datePeremption,
+  required Map<String, bool> frequences,
+}) async {
+  final now = DateTime.now();
+  final List<Map<String, dynamic>> configs = [
+    {"label": "Le jour même", "daysBefore": 0},
+    {"label": "1 jour avant", "daysBefore": 1},
+    {"label": "3 jours avant", "daysBefore": 3},
+    {"label": "1 semaine avant", "daysBefore": 7},
+  ];
+
+  for (final config in configs) {
+    if (frequences[config["label"]] == true) {
+      final notifDate = datePeremption.subtract(
+        Duration(days: config["daysBefore"]),
+      );
+      if (notifDate.isAfter(now)) {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          (produitNom.hashCode + (config["daysBefore"] as int)),
+          'Péremption à venir',
+          '$produitNom périme ${config["label"].toLowerCase()} (${DateFormat('dd/MM/yyyy').format(datePeremption)})',
+          tz.TZDateTime.from(notifDate, tz.local),
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'expiration_channel',
+              'Expiration Notifications',
+              channelDescription:
+                  'Notifications pour les produits proches de la péremption',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+          matchDateTimeComponents: DateTimeComponents.dateAndTime,
+          androidScheduleMode: AndroidScheduleMode.exact,
+        );
+      }
+    }
+  }
 }
 
 class MonApp extends StatelessWidget {
@@ -398,12 +484,10 @@ class _AccueilEcranState extends State<AccueilEcran> {
         .get();
 
     if (query.docs.isNotEmpty) {
-      // Produit déjà existant : on incrémente la quantité
       final doc = query.docs.first;
       final quantite = (doc['quantite'] ?? 1) + 1;
       await doc.reference.update({'quantite': quantite});
     } else {
-      // Nouveau produit
       await produitsRef.add({
         'nom': produit['name'],
         'date_de_peremption': produit['date'].toIso8601String(),
@@ -411,6 +495,21 @@ class _AccueilEcranState extends State<AccueilEcran> {
         'image': produit['imageUrl'],
         'quantite': 1,
       });
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('utilisateurs')
+          .doc(user.uid)
+          .get();
+      final frequences = Map<String, bool>.from(
+        userDoc.data()?['notification_frequences'] ?? {},
+      );
+      await planifierNotificationProduit(
+        produitNom: produit['name'],
+        datePeremption: produit['date'],
+        frequences: frequences,
+      );
     }
   }
 
@@ -1796,6 +1895,11 @@ class _ProfilEcranState extends State<ProfilEcran> {
                             familleId: familleId,
                             notificationFrequences: frequences,
                           );
+
+                          await reprogrammerNotificationsPourTousLesProduits(
+                            frequences,
+                          );
+
                           setState(() {
                             nom = nomController.text.trim();
                           });
