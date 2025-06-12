@@ -95,7 +95,6 @@ Future<void> reprogrammerNotificationsPourTousLesProduits(
       .collection('produits')
       .get();
 
-  // Annule toutes les notifications programmées
   await flutterLocalNotificationsPlugin.cancelAll();
 
   for (var doc in snapshot.docs) {
@@ -298,6 +297,18 @@ class MonApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: Colors.green),
+        ),
+      ),
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -389,7 +400,122 @@ class _AccueilEcranState extends State<AccueilEcran> {
   void initState() {
     super.initState();
     _verifierProduitsPerimesEtNotifer();
+    _verifierFamille();
   }
+
+  Future<void> _verifierFamille() async {
+    final familleId = await getFamilleId();
+    if (familleId == null && mounted) {
+      Future.delayed(Duration.zero, () {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text("Bienvenue !"),
+            content: const Text(
+              "Pour utiliser pleinement l'application, vous devez rejoindre ou créer une famille.",
+            ),
+            actions: [
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.green),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  final code = await showDialog<String>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Rejoindre une famille'),
+                      content: TextField(
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Code famille',
+                          hintText: 'Entrez le code famille',
+                        ),
+                        onChanged: (value) => codeFamille = value,
+                      ),
+                      actions: [
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.green,
+                          ),
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Annuler'),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.green,
+                          ),
+                          onPressed: () => Navigator.pop(context, codeFamille),
+                          child: const Text('Rejoindre'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (code != null && code.isNotEmpty) {
+                    final ok = await rejoindreFamille(code);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          ok ? "Famille rejointe !" : "Famille introuvable",
+                        ),
+                      ),
+                    );
+                    setState(() {});
+                  }
+                },
+                child: const Text("Rejoindre une famille"),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.green),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  final nomCtrl = TextEditingController();
+                  final nom = await showDialog<String>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("Nom de la famille"),
+                      content: TextField(
+                        controller: nomCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Nom de la famille",
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.green,
+                          ),
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("Annuler"),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.green,
+                          ),
+                          onPressed: () =>
+                              Navigator.pop(context, nomCtrl.text.trim()),
+                          child: const Text("Créer"),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (nom != null && nom.isNotEmpty) {
+                    await creerFamille(nom);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Famille créée !")),
+                    );
+                    setState(() {});
+                  }
+                },
+                child: const Text("Créer une famille"),
+              ),
+            ],
+          ),
+        );
+      });
+    }
+  }
+
+  String codeFamille = '';
 
   Future<void> _verifierProduitsPerimesEtNotifer() async {
     final familleId = await getFamilleId();
@@ -485,15 +611,18 @@ class _AccueilEcranState extends State<AccueilEcran> {
 
     if (query.docs.isNotEmpty) {
       final doc = query.docs.first;
-      final quantite = (doc['quantite'] ?? 1) + 1;
-      await doc.reference.update({'quantite': quantite});
+      final quantiteExistante = doc['quantite'] ?? 1;
+      final quantiteAjoutee = produit['quantite'] ?? 1;
+      await doc.reference.update({
+        'quantite': quantiteExistante + quantiteAjoutee,
+      });
     } else {
       await produitsRef.add({
         'nom': produit['name'],
         'date_de_peremption': produit['date'].toIso8601String(),
         'ajoute_le': Timestamp.now().toString(),
         'image': produit['imageUrl'],
-        'quantite': 1,
+        'quantite': produit['quantite'] ?? 1,
       });
     }
     final user = FirebaseAuth.instance.currentUser;
@@ -931,6 +1060,8 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
 
   final ImagePicker _picker = ImagePicker();
 
+  int _quantite = 1;
+
   Future<void> _scanDatePeremption() async {
     final pickedFile = await _picker.pickImage(source: ImageSource.camera);
     if (pickedFile == null) return;
@@ -1021,6 +1152,7 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
       'name': widget.nomProduit,
       'date': date,
       'imageUrl': widget.imageUrl,
+      'quantite': _quantite,
     };
 
     Navigator.pop(context, produit);
@@ -1052,6 +1184,24 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
             Text(
               'Produit : ${widget.nomProduit}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Quantité : ', style: TextStyle(fontSize: 16)),
+                IconButton(
+                  icon: const Icon(Icons.remove),
+                  onPressed: _quantite > 1
+                      ? () => setState(() => _quantite--)
+                      : null,
+                ),
+                Text('$_quantite', style: const TextStyle(fontSize: 18)),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: () => setState(() => _quantite++),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             TextField(
@@ -1405,10 +1555,42 @@ class ListeCoursesEcran extends StatefulWidget {
 }
 
 class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
+  Future<void> _supprimerCourse(String familleId, String docId) async {
+    await FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
+        .collection('courses')
+        .doc(docId)
+        .delete();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Produit supprimé de la liste.")),
+    );
+  }
+
+  Future<void> _toggleAchete(
+    String familleId,
+    String docId,
+    bool actuel,
+  ) async {
+    await FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
+        .collection('courses')
+        .doc(docId)
+        .update({'achete': !actuel});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🛒 Liste de courses')),
+      appBar: AppBar(
+        title: const Text('🛒 Liste de courses'),
+        actions: const [
+          ProfilAvatarButton(
+            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+          ),
+        ],
+      ),
       body: FutureBuilder<String?>(
         future: getFamilleId(),
         builder: (context, familleSnapshot) {
@@ -1426,6 +1608,7 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
                 .collection('familles')
                 .doc(familleId)
                 .collection('courses')
+                .orderBy('date', descending: false)
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
@@ -1438,7 +1621,12 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
               final items = snapshot.data!.docs;
 
               if (items.isEmpty) {
-                return const Center(child: Text('Ta liste est vide 🥲'));
+                return const Center(
+                  child: Text(
+                    'Ta liste est vide 🥲',
+                    style: TextStyle(fontSize: 18, color: Colors.grey),
+                  ),
+                );
               }
 
               return ListView.builder(
@@ -1460,7 +1648,15 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
                     ),
                     elevation: 4,
                     margin: const EdgeInsets.symmetric(vertical: 8),
+                    color: achete ? Colors.green[50] : Colors.white,
                     child: ListTile(
+                      leading: Icon(
+                        achete
+                            ? Icons.check_circle
+                            : Icons.radio_button_unchecked,
+                        color: achete ? Colors.green : Colors.grey,
+                        size: 32,
+                      ),
                       title: Text(
                         nom,
                         style: TextStyle(
@@ -1468,25 +1664,20 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
                               ? TextDecoration.lineThrough
                               : null,
                           color: achete ? Colors.grey : Colors.black,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 18,
                         ),
                       ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (date != null)
-                            Text(
-                              'À consommer avant le ${DateFormat('dd/MM/yyyy').format(date)}',
-                            ),
-                          Text(
-                            achete ? '✅ Acheté' : '🕒 À acheter',
-                            style: TextStyle(
-                              color: achete ? Colors.green : Colors.orange,
-                            ),
-                          ),
-                        ],
-                      ),
+                      subtitle: date != null
+                          ? Text(
+                              'Ajouté le ${DateFormat('dd/MM/yyyy').format(date)}',
+                              style: TextStyle(
+                                color: achete ? Colors.grey : Colors.black54,
+                              ),
+                            )
+                          : null,
                       trailing: Row(
-                        mainAxisSize: MainAxisSize.max,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
                             icon: Icon(
@@ -1498,25 +1689,13 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
                             tooltip: achete
                                 ? 'Marqué comme acheté'
                                 : 'Cocher comme acheté',
-                            onPressed: () {
-                              FirebaseFirestore.instance
-                                  .collection('familles')
-                                  .doc(familleId)
-                                  .collection('courses')
-                                  .doc(docId)
-                                  .update({'achete': !achete});
-                            },
+                            onPressed: () =>
+                                _toggleAchete(familleId, docId, achete),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              FirebaseFirestore.instance
-                                  .collection('familles')
-                                  .doc(familleId)
-                                  .collection('courses')
-                                  .doc(docId)
-                                  .delete();
-                            },
+                            tooltip: "Supprimer",
+                            onPressed: () => _supprimerCourse(familleId, docId),
                           ),
                         ],
                       ),
@@ -1664,7 +1843,25 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
                         : const Icon(Icons.fastfood),
                     title: Text(p['nom'] ?? ''),
                     subtitle: Text(
-                      'Périme le ${p['date_de_peremption'] ?? ''}',
+                      p['date_de_peremption'] != null
+                          ? (() {
+                              DateTime? date;
+                              try {
+                                date = DateFormat(
+                                  'dd/MM/yyyy',
+                                ).parseStrict(p['date_de_peremption']);
+                              } catch (_) {
+                                try {
+                                  date = DateTime.parse(
+                                    p['date_de_peremption'],
+                                  );
+                                } catch (_) {}
+                              }
+                              return date != null
+                                  ? 'Périme le ${DateFormat('dd/MM/yyyy').format(date)}'
+                                  : 'Date invalide';
+                            })()
+                          : 'Date inconnue',
                     ),
                   );
                 },
@@ -1858,22 +2055,71 @@ class _ProfilEcranState extends State<ProfilEcran> {
                         ],
                       ),
                       const SizedBox(height: 20),
-                      TextField(
-                        controller: nomController,
-                        textAlign: TextAlign.center,
-                        decoration: const InputDecoration(
-                          labelText: "Nom d'utilisateur",
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            nom,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        onChanged: (val) {
-                          setState(() {
-                            nom = val;
-                          });
-                        },
+                          IconButton(
+                            icon: const Icon(Icons.edit, size: 20),
+                            tooltip: "Modifier le nom",
+                            onPressed: () async {
+                              final controller = TextEditingController(
+                                text: nom,
+                              );
+                              final nouveauNom = await showDialog<String>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text("Modifier le nom"),
+                                  content: TextField(
+                                    controller: controller,
+                                    decoration: const InputDecoration(
+                                      labelText: "Nouveau nom",
+                                    ),
+                                    autofocus: true,
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text("Annuler"),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(
+                                        context,
+                                        controller.text.trim(),
+                                      ),
+                                      child: const Text("Enregistrer"),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (nouveauNom != null &&
+                                  nouveauNom.isNotEmpty &&
+                                  nouveauNom != nom) {
+                                await enregistrerInfosUtilisateur(
+                                  nom: nouveauNom,
+                                  email: email,
+                                  photoUrl: photoUrl,
+                                  familleId: familleId,
+                                  notificationFrequences: frequences,
+                                );
+                                setState(() {
+                                  nom = nouveauNom;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text("Nom mis à jour !"),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       ElevatedButton.icon(
@@ -2053,6 +2299,38 @@ class _ProfilEcranState extends State<ProfilEcran> {
                         }
                       },
                       child: const Text("Rejoindre une famille"),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: familleId == null
+                          ? null
+                          : () async {
+                              final user = FirebaseAuth.instance.currentUser;
+                              if (user == null) return;
+                              await FirebaseFirestore.instance
+                                  .collection('familles')
+                                  .doc(familleId)
+                                  .update({
+                                    'membres': FieldValue.arrayRemove([
+                                      user.uid,
+                                    ]),
+                                  });
+                              await FirebaseFirestore.instance
+                                  .collection('utilisateurs')
+                                  .doc(user.uid)
+                                  .set({
+                                    'familleId': FieldValue.delete(),
+                                  }, SetOptions(merge: true));
+                              setState(() {
+                                this.familleId = null;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text("Vous avez quitté la famille."),
+                                ),
+                              );
+                            },
+                      icon: const Icon(Icons.exit_to_app),
+                      label: const Text("Quitter la famille"),
                     ),
                   ],
                 ),
