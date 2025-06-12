@@ -14,6 +14,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:permission_handler/permission_handler.dart';
+
+Future<void> _demanderPermissionNotification() async {
+  if (Platform.isAndroid) {
+    final status = await Permission.notification.status;
+    if (!status.isGranted) {
+      await Permission.notification.request();
+    }
+  }
+}
 
 Future<void> creerFamille(String nomFamille) async {
   final user = FirebaseAuth.instance.currentUser;
@@ -160,6 +170,47 @@ class _LoginEcranState extends State<LoginEcran> {
     }
   }
 
+  Future<void> _resetPassword() async {
+    final emailCtrl = TextEditingController(text: emailController.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Réinitialiser le mot de passe'),
+        content: TextField(
+          controller: emailCtrl,
+          decoration: const InputDecoration(labelText: 'Email'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, emailCtrl.text.trim()),
+            child: const Text('Envoyer'),
+          ),
+        ],
+      ),
+    );
+    if (email != null && email.isNotEmpty) {
+      try {
+        await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Email de réinitialisation envoyé.')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Erreur : ${e.toString()}')));
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -185,6 +236,10 @@ class _LoginEcranState extends State<LoginEcran> {
             TextButton(
               onPressed: () => setState(() => isLogin = !isLogin),
               child: Text(isLogin ? 'Créer un compte' : 'J’ai déjà un compte'),
+            ),
+            TextButton(
+              onPressed: _resetPassword,
+              child: const Text('Mot de passe oublié ?'),
             ),
             if (error.isNotEmpty)
               Text(error, style: TextStyle(color: Colors.red)),
@@ -215,6 +270,7 @@ class ProfilAvatarButton extends StatelessWidget {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _demanderPermissionNotification();
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
   const InitializationSettings initializationSettings = InitializationSettings(
@@ -243,6 +299,23 @@ void main() async {
   await Firebase.initializeApp()
       .then((_) {
         runApp(const MonApp());
+        Future.delayed(Duration(seconds: 5), () async {
+          await flutterLocalNotificationsPlugin.show(
+            9999,
+            'Test notification',
+            'Ceci est un test de notification',
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'expiration_channel',
+                'Expiration Notifications',
+                channelDescription:
+                    'Notifications pour les produits proches de la péremption',
+                importance: Importance.high,
+                priority: Priority.high,
+              ),
+            ),
+          );
+        });
       })
       .catchError((error) {
         print("Erreur lors de l'initialisation de Firebase : $error");
@@ -632,7 +705,13 @@ class _AccueilEcranState extends State<AccueilEcran> {
           .doc(user.uid)
           .get();
       final frequences = Map<String, bool>.from(
-        userDoc.data()?['notification_frequences'] ?? {},
+        userDoc.data()?['notification_frequences'] ??
+            {
+              "Le jour même": true,
+              "1 jour avant": false,
+              "3 jours avant": false,
+              "1 semaine avant": false,
+            },
       );
       await planifierNotificationProduit(
         produitNom: produit['name'],
