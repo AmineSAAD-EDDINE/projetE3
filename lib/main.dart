@@ -137,6 +137,8 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 class LoginEcran extends StatefulWidget {
+  const LoginEcran({super.key});
+
   @override
   State<LoginEcran> createState() => _LoginEcranState();
 }
@@ -933,6 +935,15 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                           .collection('produits')
                                           .doc(p.id)
                                           .delete();
+                                      await FirebaseFirestore.instance
+                                          .collection('familles')
+                                          .doc(familleId)
+                                          .collection('produits')
+                                          .doc(p.id)
+                                          .update({
+                                            'supprime_le': DateTime.now()
+                                                .toIso8601String(),
+                                          });
                                     }
                                   } else {
                                     final familleId = await getFamilleId();
@@ -944,6 +955,15 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                           .doc(p.id)
                                           .update({
                                             'quantite': quantite - result,
+                                          });
+                                      await FirebaseFirestore.instance
+                                          .collection('familles')
+                                          .doc(familleId)
+                                          .collection('produits')
+                                          .doc(p.id)
+                                          .update({
+                                            'supprime_le': DateTime.now()
+                                                .toIso8601String(),
                                           });
                                     }
                                   }
@@ -957,6 +977,15 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                       .collection('produits')
                                       .doc(p.id)
                                       .delete();
+                                  await FirebaseFirestore.instance
+                                      .collection('familles')
+                                      .doc(familleId)
+                                      .collection('produits')
+                                      .doc(p.id)
+                                      .update({
+                                        'supprime_le': DateTime.now()
+                                            .toIso8601String(),
+                                      });
                                 }
                               }
                             },
@@ -998,6 +1027,8 @@ class _AccueilEcranState extends State<AccueilEcran> {
 }
 
 class ScanEcran extends StatefulWidget {
+  const ScanEcran({super.key});
+
   @override
   _ScanEcranState createState() => _ScanEcranState();
 }
@@ -1128,11 +1159,11 @@ class ResultatEcranScan extends StatefulWidget {
   final String? codeBarres;
 
   const ResultatEcranScan({
-    Key? key,
+    super.key,
     required this.nomProduit,
     this.imageUrl,
     this.codeBarres,
-  }) : super(key: key);
+  });
 
   @override
   State<ResultatEcranScan> createState() => _ResultatEcranScanState();
@@ -1254,6 +1285,7 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
     }
   }
 
+  @override
   void dispose() {
     _dateController.dispose();
     _codeBarresController.dispose();
@@ -1361,7 +1393,7 @@ class Recette {
 }
 
 class RecettesEcran extends StatefulWidget {
-  const RecettesEcran({Key? key}) : super(key: key);
+  const RecettesEcran({super.key});
 
   @override
   State<RecettesEcran> createState() => _RecettesEcranState();
@@ -1662,7 +1694,7 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
   }
 
   List<Map<String, dynamic>> _suggestions = [];
-  String _rechercheTexte = '';
+  final String _rechercheTexte = '';
   bool _chargementSuggestions = false;
   final TextEditingController _rechercheController = TextEditingController();
 
@@ -1889,8 +1921,8 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _ouvrirAjoutProduit(context),
-        child: const Icon(Icons.add),
         tooltip: "Ajouter un produit",
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -2020,7 +2052,7 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
         .collection('produits')
         .get();
     final produits = snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
+      final data = doc.data();
       data['id'] = doc.id;
       return data;
     }).toList();
@@ -2198,6 +2230,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
     _chargerInfosUtilisateur();
   }
 
+  @override
   void dispose() {
     nomController.dispose();
     super.dispose();
@@ -2286,6 +2319,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
     );
   }
 
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
@@ -2613,7 +2647,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
                                     'familleId': FieldValue.delete(),
                                   }, SetOptions(merge: true));
                               setState(() {
-                                this.familleId = null;
+                                familleId = null;
                               });
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -2627,6 +2661,16 @@ class _ProfilEcranState extends State<ProfilEcran> {
                   ],
                 ),
               ),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.bar_chart),
+              label: const Text('Statistiques'),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const StatistiquesEcran()),
+                );
+              },
             ),
             ElevatedButton.icon(
               icon: const Icon(Icons.info_outline),
@@ -2658,7 +2702,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
 }
 
 class AProposEcran extends StatelessWidget {
-  const AProposEcran({Key? key}) : super(key: key);
+  const AProposEcran({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -2700,9 +2744,11 @@ class AProposEcran extends StatelessWidget {
               subtitle: Text(''),
             ),
             ListTile(
-              leading: CircleAvatar(child: Text('C')),
+              leading: CircleAvatar(child: Text('D')),
               title: Text('Amine Saad-Eddine'),
-              subtitle: Text(''),
+              subtitle: Text(
+                'Étudiant à l’ESIEE Paris, passionné de data. A contribué à la partie mobile et Firebase. Gardien de but à ses heures perdues.',
+              ),
             ),
             const SizedBox(height: 24),
             const Text(
@@ -2710,6 +2756,127 @@ class AProposEcran extends StatelessWidget {
               style: TextStyle(fontStyle: FontStyle.italic),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class StatistiquesEcran extends StatefulWidget {
+  const StatistiquesEcran({super.key});
+
+  @override
+  State<StatistiquesEcran> createState() => _StatistiquesEcranState();
+}
+
+class _StatistiquesEcranState extends State<StatistiquesEcran> {
+  int total = 0;
+  int consommesAvantPeremption = 0;
+  double pourcentage = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _chargerStats();
+  }
+
+  Future<void> _chargerStats() async {
+    final familleId = await getFamilleId();
+    if (familleId == null) return;
+    final snapshot = await FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
+        .collection('produits')
+        .get();
+
+    int totalProduits = snapshot.docs.length;
+    int nonGaspilles = 0;
+
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      final rawDate = data['date_de_peremption'];
+      DateTime? date;
+      if (rawDate is String && rawDate.isNotEmpty) {
+        try {
+          date = DateTime.parse(rawDate);
+        } catch (_) {
+          try {
+            date = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
+          } catch (_) {}
+        }
+      } else if (rawDate is Timestamp) {
+        date = rawDate.toDate();
+      }
+
+      final dateSupp = data['supprime_le'];
+      if (date != null && dateSupp != null) {
+        DateTime dateSuppression;
+        try {
+          dateSuppression = DateTime.parse(dateSupp);
+        } catch (_) {
+          dateSuppression = DateTime.now();
+        }
+        if (dateSuppression.isBefore(date)) {
+          nonGaspilles++;
+        }
+      }
+    }
+
+    setState(() {
+      total = totalProduits;
+      consommesAvantPeremption = nonGaspilles;
+      pourcentage = total > 0 ? (nonGaspilles / total) * 100 : 0;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Statistiques anti-gaspillage')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Card(
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Vos statistiques',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Produits consommés avant péremption : $consommesAvantPeremption',
+                  style: const TextStyle(fontSize: 18),
+                ),
+                Text(
+                  'Total de produits ajoutés : $total',
+                  style: const TextStyle(fontSize: 18),
+                ),
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: pourcentage / 100,
+                  minHeight: 12,
+                  backgroundColor: Colors.grey[200],
+                  color: Colors.green,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Anti-gaspillage : ${pourcentage.toStringAsFixed(1)}%',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
