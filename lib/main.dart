@@ -370,6 +370,7 @@ class MonApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         elevatedButtonTheme: ElevatedButtonThemeData(
@@ -754,9 +755,16 @@ class _AccueilEcranState extends State<AccueilEcran> {
       appBar: AppBar(
         title: const Text('Accueil'),
         foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-        actions: const [
-          ProfilAvatarButton(
-            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+        actions: [
+          IconButton(
+            icon: Icon(Icons.settings),
+            tooltip: 'Paramètres',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilEcran()),
+              );
+            },
           ),
         ],
       ),
@@ -1560,9 +1568,16 @@ class _RecettesEcranState extends State<RecettesEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recettes'),
-        actions: const [
-          ProfilAvatarButton(
-            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+        actions: [
+          IconButton(
+            icon: Icon(Icons.settings),
+            tooltip: 'Paramètres',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilEcran()),
+              );
+            },
           ),
         ],
       ),
@@ -1646,6 +1661,57 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
     );
   }
 
+  List<Map<String, dynamic>> _suggestions = [];
+  String _rechercheTexte = '';
+  bool _chargementSuggestions = false;
+  final TextEditingController _rechercheController = TextEditingController();
+
+  Future<void> _fetchSuggestions(String query) async {
+    if (query.length < 3) {
+      setState(() => _suggestions = []);
+      return;
+    }
+    setState(() => _chargementSuggestions = true);
+    final url = Uri.parse(
+      'https://world.openfoodfacts.org/cgi/search.pl?search_terms=$query&search_simple=1&action=process&json=1&page_size=10',
+    );
+    final response = await http.get(url);
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final products = (data['products'] as List)
+          .map(
+            (p) => {
+              'name': p['product_name'] ?? '',
+              'image': p['image_thumb_url'],
+            },
+          )
+          .where((p) => p['name'] != '')
+          .toList();
+      setState(() => _suggestions = products);
+    } else {
+      setState(() => _suggestions = []);
+    }
+    setState(() => _chargementSuggestions = false);
+  }
+
+  Future<void> _ajouterProduitCourse(Map<String, dynamic> produit) async {
+    final familleId = await getFamilleId();
+    if (familleId == null) return;
+    await FirebaseFirestore.instance
+        .collection('familles')
+        .doc(familleId)
+        .collection('courses')
+        .add({
+          'nom': produit['name'],
+          'image': produit['image'],
+          'achete': false,
+          'date': DateTime.now().toIso8601String(),
+        });
+    setState(() {
+      _suggestions = [];
+    });
+  }
+
   Future<void> _toggleAchete(
     String familleId,
     String docId,
@@ -1659,14 +1725,42 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
         .update({'achete': !actuel});
   }
 
+  void _ouvrirAjoutProduit(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 16,
+          right: 16,
+          top: 24,
+        ),
+        child: _AjoutProduitListeCourse(
+          onProduitAjoute: (produit) {
+            _ajouterProduitCourse(produit);
+            Navigator.pop(context);
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('🛒 Liste de courses'),
-        actions: const [
-          ProfilAvatarButton(
-            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+        actions: [
+          IconButton(
+            icon: Icon(Icons.settings),
+            tooltip: 'Paramètres',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilEcran()),
+              );
+            },
           ),
         ],
       ),
@@ -1682,109 +1776,221 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
               child: Text("Aucune famille associée à ce compte."),
             );
           }
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('familles')
-                .doc(familleId)
-                .collection('courses')
-                .orderBy('date', descending: false)
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return const Center(child: Text('Erreur de chargement'));
-              }
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
 
-              final items = snapshot.data!.docs;
+          return Column(
+            children: [
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('familles')
+                      .doc(familleId)
+                      .collection('courses')
+                      .orderBy('date', descending: false)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const Center(child: Text('Erreur de chargement'));
+                    }
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
 
-              if (items.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'Ta liste est vide 🥲',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
-                  ),
-                );
-              }
+                    final items = snapshot.data!.docs;
 
-              return ListView.builder(
-                itemCount: items.length,
-                padding: const EdgeInsets.all(12),
-                itemBuilder: (context, index) {
-                  final doc = items[index];
-                  final nom = doc['nom'] ?? '';
-                  DateTime? date;
-                  try {
-                    date = DateTime.parse(doc['date']);
-                  } catch (_) {}
-                  final achete = doc['achete'] ?? false;
-                  final docId = doc.id;
-
-                  return Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 4,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    color: achete ? Colors.green[50] : Colors.white,
-                    child: ListTile(
-                      leading: Icon(
-                        achete
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        color: achete ? Colors.green : Colors.grey,
-                        size: 32,
-                      ),
-                      title: Text(
-                        nom,
-                        style: TextStyle(
-                          decoration: achete
-                              ? TextDecoration.lineThrough
-                              : null,
-                          color: achete ? Colors.grey : Colors.black,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 18,
+                    if (items.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'Ta liste est vide 🥲',
+                          style: TextStyle(fontSize: 18, color: Colors.grey),
                         ),
-                      ),
-                      subtitle: date != null
-                          ? Text(
-                              'Ajouté le ${DateFormat('dd/MM/yyyy').format(date)}',
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: items.length,
+                      padding: const EdgeInsets.all(12),
+                      itemBuilder: (context, index) {
+                        final doc = items[index];
+                        final nom = doc['nom'] ?? '';
+                        DateTime? date;
+                        try {
+                          date = DateTime.parse(doc['date']);
+                        } catch (_) {}
+                        final achete = doc['achete'] ?? false;
+                        final docId = doc.id;
+
+                        return Card(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 4,
+                          margin: const EdgeInsets.symmetric(vertical: 8),
+                          color: achete ? Colors.green[50] : Colors.white,
+                          child: ListTile(
+                            // Supprime le leading si tu veux enlever le rond
+                            title: Text(
+                              nom,
                               style: TextStyle(
-                                color: achete ? Colors.grey : Colors.black54,
+                                decoration: achete
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                color: achete ? Colors.grey : Colors.black,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 18,
                               ),
-                            )
-                          : null,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              achete
-                                  ? Icons.check_box
-                                  : Icons.check_box_outline_blank,
-                              color: achete ? Colors.green : Colors.grey,
                             ),
-                            tooltip: achete
-                                ? 'Marqué comme acheté'
-                                : 'Cocher comme acheté',
-                            onPressed: () =>
-                                _toggleAchete(familleId, docId, achete),
+                            subtitle: date != null
+                                ? Text(
+                                    'Ajouté le ${DateFormat('dd/MM/yyyy').format(date)}',
+                                    style: TextStyle(
+                                      color: achete
+                                          ? Colors.grey
+                                          : Colors.black54,
+                                    ),
+                                  )
+                                : null,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    achete
+                                        ? Icons.check_box
+                                        : Icons.check_box_outline_blank,
+                                    color: achete ? Colors.green : Colors.grey,
+                                  ),
+                                  tooltip: achete
+                                      ? 'Marqué comme acheté'
+                                      : 'Cocher comme acheté',
+                                  onPressed: () =>
+                                      _toggleAchete(familleId, docId, achete),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                  ),
+                                  tooltip: "Supprimer",
+                                  onPressed: () =>
+                                      _supprimerCourse(familleId, docId),
+                                ),
+                              ],
+                            ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            tooltip: "Supprimer",
-                            onPressed: () => _supprimerCourse(familleId, docId),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _ouvrirAjoutProduit(context),
+        child: const Icon(Icons.add),
+        tooltip: "Ajouter un produit",
+      ),
+    );
+  }
+}
+
+class _AjoutProduitListeCourse extends StatefulWidget {
+  final Function(Map<String, dynamic>) onProduitAjoute;
+  const _AjoutProduitListeCourse({required this.onProduitAjoute});
+
+  @override
+  State<_AjoutProduitListeCourse> createState() =>
+      _AjoutProduitListeCourseState();
+}
+
+class _AjoutProduitListeCourseState extends State<_AjoutProduitListeCourse> {
+  final TextEditingController _controller = TextEditingController();
+  List<Map<String, dynamic>> _suggestions = [];
+  bool _isLoading = false;
+  String _searchText = '';
+
+  Future<void> _fetchSuggestions(String query) async {
+    if (query.length < 3) {
+      setState(() => _suggestions = []);
+      return;
+    }
+    setState(() => _isLoading = true);
+    final url = Uri.parse(
+      'https://world.openfoodfacts.org/cgi/search.pl?search_terms=$query&search_simple=1&action=process&json=1&page_size=10',
+    );
+    final response = await http.get(url);
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final products = (data['products'] as List)
+          .map(
+            (p) => {
+              'name': p['product_name'] ?? '',
+              'image': p['image_thumb_url'],
+            },
+          )
+          .where((p) => p['name'] != '')
+          .toList();
+      setState(() => _suggestions = products);
+    } else {
+      setState(() => _suggestions = []);
+    }
+    setState(() => _isLoading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Rechercher un produit...',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (val) {
+              setState(() {
+                _searchText = val;
+              });
+              _fetchSuggestions(val);
+            },
+            onSubmitted: (val) {
+              if (val.trim().isNotEmpty) {
+                widget.onProduitAjoute({'name': val.trim(), 'image': null});
+              }
+            },
+          ),
+          if (_isLoading) const LinearProgressIndicator(),
+          if (_suggestions.isNotEmpty)
+            SizedBox(
+              height: 200,
+              child: ListView.builder(
+                itemCount: _suggestions.length,
+                itemBuilder: (context, index) {
+                  final prod = _suggestions[index];
+                  return ListTile(
+                    leading: prod['image'] != null
+                        ? Image.network(prod['image'], width: 40, height: 40)
+                        : const Icon(Icons.fastfood),
+                    title: Text(prod['name']),
+                    onTap: () => widget.onProduitAjoute(prod),
+                  );
+                },
+              ),
+            ),
+          if (_suggestions.isEmpty && _searchText.length >= 3 && !_isLoading)
+            ListTile(
+              leading: const Icon(Icons.add),
+              title: Text('Ajouter "$_searchText" à la liste'),
+              onTap: () =>
+                  widget.onProduitAjoute({'name': _searchText, 'image': null}),
+            ),
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }
@@ -1849,9 +2055,16 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
       appBar: AppBar(
         title: const Text('Calendrier'),
         foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-        actions: const [
-          ProfilAvatarButton(
-            photoUrl: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+        actions: [
+          IconButton(
+            icon: Icon(Icons.settings),
+            tooltip: 'Paramètres',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilEcran()),
+              );
+            },
           ),
         ],
       ),
@@ -1905,45 +2118,45 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
                 "Produits qui périment entre aujourd'hui et le ${DateFormat('dd/MM/yyyy').format(_selectedDay!)} :",
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              ListView.builder(
-                shrinkWrap: true,
-                physics: NeverScrollableScrollPhysics(),
-                itemCount: produitsFiltres.length,
-                itemBuilder: (context, index) {
-                  final p = produitsFiltres[index];
-                  return ListTile(
-                    leading: p['image'] != null
-                        ? Image.network(
-                            p['image'],
-                            width: 40,
-                            height: 40,
-                            fit: BoxFit.cover,
-                          )
-                        : const Icon(Icons.fastfood),
-                    title: Text(p['nom'] ?? ''),
-                    subtitle: Text(
-                      p['date_de_peremption'] != null
-                          ? (() {
-                              DateTime? date;
-                              try {
-                                date = DateFormat(
-                                  'dd/MM/yyyy',
-                                ).parseStrict(p['date_de_peremption']);
-                              } catch (_) {
+              Expanded(
+                child: ListView.builder(
+                  itemCount: produitsFiltres.length,
+                  itemBuilder: (context, index) {
+                    final p = produitsFiltres[index];
+                    return ListTile(
+                      leading: p['image'] != null
+                          ? Image.network(
+                              p['image'],
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                            )
+                          : const Icon(Icons.fastfood),
+                      title: Text(p['nom'] ?? ''),
+                      subtitle: Text(
+                        p['date_de_peremption'] != null
+                            ? (() {
+                                DateTime? date;
                                 try {
-                                  date = DateTime.parse(
-                                    p['date_de_peremption'],
-                                  );
-                                } catch (_) {}
-                              }
-                              return date != null
-                                  ? 'Périme le ${DateFormat('dd/MM/yyyy').format(date)}'
-                                  : 'Date invalide';
-                            })()
-                          : 'Date inconnue',
-                    ),
-                  );
-                },
+                                  date = DateFormat(
+                                    'dd/MM/yyyy',
+                                  ).parseStrict(p['date_de_peremption']);
+                                } catch (_) {
+                                  try {
+                                    date = DateTime.parse(
+                                      p['date_de_peremption'],
+                                    );
+                                  } catch (_) {}
+                                }
+                                return date != null
+                                    ? 'Périme le ${DateFormat('dd/MM/yyyy').format(date)}'
+                                    : 'Date invalide';
+                              })()
+                            : 'Date inconnue',
+                      ),
+                    );
+                  },
+                ),
               ),
             ] else if (_selectedDay != null) ...[
               const SizedBox(height: 20),
@@ -2415,6 +2628,16 @@ class _ProfilEcranState extends State<ProfilEcran> {
                 ),
               ),
             ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.info_outline),
+              label: const Text("À propos de nous"),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AProposEcran()),
+                );
+              },
+            ),
             const SizedBox(height: 30),
             ElevatedButton.icon(
               onPressed: () async {
@@ -2426,6 +2649,65 @@ class _ProfilEcranState extends State<ProfilEcran> {
                 backgroundColor: Colors.red,
                 foregroundColor: Colors.white,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AProposEcran extends StatelessWidget {
+  const AProposEcran({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('À propos de nous')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'MonFrigo+',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Application créée pour lutter contre le gaspillage alimentaire et faciliter la gestion de votre frigo.',
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 32),
+            const Text(
+              'Les codeurs :',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: CircleAvatar(child: Text('A')),
+              title: Text('Daryl Coddeville'),
+              subtitle: Text(''),
+            ),
+            ListTile(
+              leading: CircleAvatar(child: Text('B')),
+              title: Text('Maxence Delehelle'),
+              subtitle: Text(''),
+            ),
+            ListTile(
+              leading: CircleAvatar(child: Text('C')),
+              title: Text('Amine El Mouttaki'),
+              subtitle: Text(''),
+            ),
+            ListTile(
+              leading: CircleAvatar(child: Text('C')),
+              title: Text('Amine Saad-Eddine'),
+              subtitle: Text(''),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Merci d\'utiliser notre application !',
+              style: TextStyle(fontStyle: FontStyle.italic),
             ),
           ],
         ),
