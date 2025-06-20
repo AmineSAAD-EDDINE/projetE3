@@ -7,6 +7,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -137,8 +138,6 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 class LoginEcran extends StatefulWidget {
-  const LoginEcran({super.key});
-
   @override
   State<LoginEcran> createState() => _LoginEcranState();
 }
@@ -375,6 +374,7 @@ class MonApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        scaffoldBackgroundColor: Colors.grey[100],
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
@@ -412,10 +412,10 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
   int _selectedIndex = 2;
 
   final List<Widget> _screens = const [
-    CalendrierEcran(),
-    ListeCoursesEcran(),
     AccueilEcran(),
     RecettesEcran(),
+    ListeCoursesEcran(),
+    CalendrierEcran(),
     ProfilEcran(),
   ];
 
@@ -433,17 +433,19 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
         unselectedItemColor: Colors.grey,
         selectedItemColor: Colors.green,
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.calendar_today),
-            label: 'Calendrier',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Liste'),
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Accueil'),
           BottomNavigationBarItem(
             icon: Icon(Icons.restaurant),
             label: 'Recettes',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.list),
+            label: 'Liste de courses',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_today),
+            label: 'Calendrier',
+          ),
         ],
       ),
     );
@@ -633,33 +635,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
         }
       }
     }
-
-    if (ingredientsExpiringSoon.isNotEmpty) {
-      final recipeGenerator = _RecettesEcranState();
-      final recettes = await recipeGenerator._genererRecette(
-        ingredientsExpiringSoon,
-      );
-
-      if (recettes.isNotEmpty && recettes[0].titre.isNotEmpty) {
-        final notificationDetails = const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'expiration_channel',
-            'Expiration Notifications',
-            channelDescription:
-                'Notifications pour les produits proches de la péremption',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
-        );
-
-        await flutterLocalNotificationsPlugin.show(
-          0,
-          'Produits proches de la péremption',
-          'Essayez cette recette : ${recettes[0].titre}',
-          notificationDetails,
-        );
-      }
-    }
   }
 
   Future<void> _ajouterProduit(Map<String, dynamic> produit) async {
@@ -797,6 +772,24 @@ class _AccueilEcranState extends State<AccueilEcran> {
                 return const Center(child: CircularProgressIndicator());
               }
               final produits = snapshot.data!.docs;
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.kitchen, color: Colors.green[400], size: 48),
+                    const SizedBox(width: 12),
+                    Text(
+                      "Bienvenue dans MonFrigo+",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[700],
+                      ),
+                    ),
+                  ],
+                ),
+              );
               return ListView.builder(
                 padding: const EdgeInsets.all(12),
                 itemCount: produits.length,
@@ -935,15 +928,64 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                           .collection('produits')
                                           .doc(p.id)
                                           .delete();
-                                      await FirebaseFirestore.instance
+                                      DateTime? datePeremption;
+                                      final rawDate = p['date_de_peremption'];
+                                      if (rawDate is String &&
+                                          rawDate.isNotEmpty) {
+                                        try {
+                                          datePeremption = DateTime.parse(
+                                            rawDate,
+                                          );
+                                        } catch (_) {
+                                          try {
+                                            datePeremption = DateFormat(
+                                              'dd/MM/yyyy',
+                                            ).parseStrict(rawDate);
+                                          } catch (_) {}
+                                        }
+                                      } else if (rawDate is Timestamp) {
+                                        datePeremption = rawDate.toDate();
+                                      }
+                                      final maintenant = DateTime.now();
+
+                                      // Référence du doc stats
+                                      final statsRef = FirebaseFirestore
+                                          .instance
                                           .collection('familles')
                                           .doc(familleId)
-                                          .collection('produits')
-                                          .doc(p.id)
-                                          .update({
-                                            'supprime_le': DateTime.now()
-                                                .toIso8601String(),
-                                          });
+                                          .collection('stats')
+                                          .doc('global');
+
+                                      // Quantité supprimée (result ou 1)
+                                      final quantiteSupprimee = (result ?? 1);
+
+                                      if (datePeremption != null) {
+                                        if (maintenant.isBefore(
+                                          datePeremption,
+                                        )) {
+                                          // Consommé avant péremption
+                                          await statsRef.set({
+                                            'total_non_gaspilles':
+                                                FieldValue.increment(
+                                                  quantiteSupprimee,
+                                                ),
+                                          }, SetOptions(merge: true));
+                                        } else {
+                                          // Supprimé après péremption
+                                          await statsRef.set({
+                                            'total_gaspilles':
+                                                FieldValue.increment(
+                                                  quantiteSupprimee,
+                                                ),
+                                          }, SetOptions(merge: true));
+                                        }
+                                      }
+                                      // Optionnel : total supprimés
+                                      await statsRef.set({
+                                        'total_ajoutes': FieldValue.increment(
+                                          quantiteSupprimee,
+                                        ),
+                                      }, SetOptions(merge: true));
                                     }
                                   } else {
                                     final familleId = await getFamilleId();
@@ -956,15 +998,57 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                           .update({
                                             'quantite': quantite - result,
                                           });
-                                      await FirebaseFirestore.instance
+                                      DateTime? datePeremption;
+                                      final rawDate = p['date_de_peremption'];
+                                      if (rawDate is String &&
+                                          rawDate.isNotEmpty) {
+                                        try {
+                                          datePeremption = DateTime.parse(
+                                            rawDate,
+                                          );
+                                        } catch (_) {
+                                          try {
+                                            datePeremption = DateFormat(
+                                              'dd/MM/yyyy',
+                                            ).parseStrict(rawDate);
+                                          } catch (_) {}
+                                        }
+                                      } else if (rawDate is Timestamp) {
+                                        datePeremption = rawDate.toDate();
+                                      }
+                                      final maintenant = DateTime.now();
+                                      final statsRef = FirebaseFirestore
+                                          .instance
                                           .collection('familles')
                                           .doc(familleId)
-                                          .collection('produits')
-                                          .doc(p.id)
-                                          .update({
-                                            'supprime_le': DateTime.now()
-                                                .toIso8601String(),
-                                          });
+                                          .collection('stats')
+                                          .doc('global');
+                                      final quantiteSupprimee = (quantite ?? 1);
+
+                                      if (datePeremption != null) {
+                                        if (maintenant.isBefore(
+                                          datePeremption,
+                                        )) {
+                                          await statsRef.set({
+                                            'total_non_gaspilles':
+                                                FieldValue.increment(
+                                                  quantiteSupprimee,
+                                                ),
+                                          }, SetOptions(merge: true));
+                                        } else {
+                                          await statsRef.set({
+                                            'total_gaspilles':
+                                                FieldValue.increment(
+                                                  quantiteSupprimee,
+                                                ),
+                                          }, SetOptions(merge: true));
+                                        }
+                                      }
+                                      await statsRef.set({
+                                        'total_ajoutes': FieldValue.increment(
+                                          quantiteSupprimee,
+                                        ),
+                                      }, SetOptions(merge: true));
                                     }
                                   }
                                 }
@@ -977,15 +1061,57 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                       .collection('produits')
                                       .doc(p.id)
                                       .delete();
-                                  await FirebaseFirestore.instance
+                                  DateTime? datePeremption;
+                                  final rawDate = p['date_de_peremption'];
+                                  if (rawDate is String && rawDate.isNotEmpty) {
+                                    try {
+                                      datePeremption = DateTime.parse(rawDate);
+                                    } catch (_) {
+                                      try {
+                                        datePeremption = DateFormat(
+                                          'dd/MM/yyyy',
+                                        ).parseStrict(rawDate);
+                                      } catch (_) {}
+                                    }
+                                  } else if (rawDate is Timestamp) {
+                                    datePeremption = rawDate.toDate();
+                                  }
+                                  final maintenant = DateTime.now();
+
+                                  // Référence du doc stats
+                                  final statsRef = FirebaseFirestore.instance
                                       .collection('familles')
                                       .doc(familleId)
-                                      .collection('produits')
-                                      .doc(p.id)
-                                      .update({
-                                        'supprime_le': DateTime.now()
-                                            .toIso8601String(),
-                                      });
+                                      .collection('stats')
+                                      .doc('global');
+
+                                  // Quantité supprimée (result ou 1)
+                                  final quantiteSupprimee = (quantite ?? 1);
+
+                                  if (datePeremption != null) {
+                                    if (maintenant.isBefore(datePeremption)) {
+                                      // Consommé avant péremption
+                                      await statsRef.set({
+                                        'total_non_gaspilles':
+                                            FieldValue.increment(
+                                              quantiteSupprimee,
+                                            ),
+                                      }, SetOptions(merge: true));
+                                    } else {
+                                      // Supprimé après péremption
+                                      await statsRef.set({
+                                        'total_gaspilles': FieldValue.increment(
+                                          quantiteSupprimee,
+                                        ),
+                                      }, SetOptions(merge: true));
+                                    }
+                                  }
+                                  // Optionnel : total supprimés
+                                  await statsRef.set({
+                                    'total_ajoutes': FieldValue.increment(
+                                      quantiteSupprimee,
+                                    ),
+                                  }, SetOptions(merge: true));
                                 }
                               }
                             },
@@ -1027,8 +1153,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
 }
 
 class ScanEcran extends StatefulWidget {
-  const ScanEcran({super.key});
-
   @override
   _ScanEcranState createState() => _ScanEcranState();
 }
@@ -1159,11 +1283,11 @@ class ResultatEcranScan extends StatefulWidget {
   final String? codeBarres;
 
   const ResultatEcranScan({
-    super.key,
+    Key? key,
     required this.nomProduit,
     this.imageUrl,
     this.codeBarres,
-  });
+  }) : super(key: key);
 
   @override
   State<ResultatEcranScan> createState() => _ResultatEcranScanState();
@@ -1285,7 +1409,6 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
     }
   }
 
-  @override
   void dispose() {
     _dateController.dispose();
     _codeBarresController.dispose();
@@ -1336,7 +1459,7 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
                 final pickedDate = await showDatePicker(
                   context: context,
                   initialDate: DateTime.now(),
-                  firstDate: DateTime(2020),
+                  firstDate: DateTime.now(),
                   lastDate: DateTime(2030),
                 );
                 if (pickedDate != null) {
@@ -1380,16 +1503,21 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
   }
 }
 
-class Recette {
-  final String titre;
-  final List<String> ingredients;
-  final List<String> instructions;
+enum TriType {
+  nomCroissant,
+  nomDecroissant,
+  ingredientsCroissant,
+  ingredientsDecroissant,
+  nouveaute,
+}
 
-  Recette({
-    required this.titre,
-    required this.ingredients,
-    required this.instructions,
-  });
+enum FiltreIngredients {
+  tous,
+  aucunManquant,
+  unManquant,
+  deuxManquants,
+  troisManquants,
+  favoris,
 }
 
 class RecettesEcran extends StatefulWidget {
@@ -1400,199 +1528,166 @@ class RecettesEcran extends StatefulWidget {
 }
 
 class _RecettesEcranState extends State<RecettesEcran> {
-  List<Recette>? recettes;
-  bool isLoading = false;
-  String? erreur;
+  List<Map<String, dynamic>> _allRecettes = [];
+  List<Map<String, dynamic>> _displayedRecettes = [];
+  List<String> _ingredientsPossedes = [];
+  List<String> _favorisTitres = [];
 
-  static const String openAIApiKey =
-      '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';
+  TriType _triType = TriType.nouveaute;
+  FiltreIngredients _filtre = FiltreIngredients.tous;
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _chargerIngredientsEtGenererRecette();
+    _loadRecettesEtDonnees();
   }
 
-  Future<void> _chargerIngredientsEtGenererRecette() async {
-    setState(() {
-      isLoading = true;
-      erreur = null;
-      recettes = null;
-    });
+  Future<void> _loadRecettesEtDonnees() async {
+    final jsonString = await rootBundle.loadString('assets/recettes.json');
+    final List<dynamic> jsonData = json.decode(jsonString);
+    _allRecettes = List<Map<String, dynamic>>.from(jsonData).where((recette) {
+      final imageUrl = (recette['image_url'] ?? '').toString();
+      final ingredients = recette['ingredients'] as List? ?? [];
+      return imageUrl !=
+              'https://static.afcdn.com/relmrtn/Front/Vendor/img/default-recipe-picture_80x80.jpg' &&
+          imageUrl.isNotEmpty &&
+          ingredients.length > 3;
+    }).toList();
 
-    try {
-      final familleId = await getFamilleId();
-      if (familleId == null) {
-        setState(() {
-          erreur = "Aucune famille associée à ce compte.";
-          isLoading = false;
-        });
-        return;
-      }
+    final familleId = await getFamilleId();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (familleId != null && uid != null) {
       final snapshot = await FirebaseFirestore.instance
           .collection('familles')
           .doc(familleId)
           .collection('produits')
           .get();
 
-      final ingredients = <String>[];
-      final currentDate = DateTime.now();
+      _ingredientsPossedes = snapshot.docs
+          .map((doc) => doc['nom'].toString().toLowerCase())
+          .toList();
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final rawDate = data['date_de_peremption'];
-        DateTime? expirationDate;
+      final favorisSnap = await FirebaseFirestore.instance
+          .collection('utilisateurs')
+          .doc(uid)
+          .collection('favoris')
+          .get();
 
-        if (rawDate is String && rawDate.isNotEmpty) {
-          try {
-            expirationDate = DateTime.parse(rawDate);
-          } catch (_) {
-            try {
-              expirationDate = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
-            } catch (_) {}
-          }
-        } else if (rawDate is Timestamp) {
-          expirationDate = rawDate.toDate();
-        }
-
-        if (expirationDate != null &&
-            expirationDate.isAfter(currentDate) &&
-            data['nom'] != null &&
-            data['nom'].toString().isNotEmpty) {
-          ingredients.add(data['nom'].toString());
-        }
-      }
-
-      if (ingredients.isEmpty) {
-        setState(() {
-          erreur = "Aucun ingrédient non périmé trouvé.";
-          isLoading = false;
-        });
-        return;
-      }
-
-      await _genererRecette(ingredients);
-    } catch (e) {
-      setState(() {
-        erreur = "Erreur lors de la récupération des ingrédients : $e";
-        isLoading = false;
-      });
+      _favorisTitres = favorisSnap.docs.map((doc) => doc.id).toList();
     }
+
+    _filtrerEtTrier();
   }
 
-  Future<List<Recette>> _genererRecette(List<String> ingredients) async {
-    final prompt =
-        "Génère 3 recettes simples, rapides et en français utilisant uniquement ces ingrédients : ${ingredients.join(', ')}. "
-        "Pour chaque recette, donne :\n"
-        "- Titre : <titre de la recette>\n"
-        "- Ingrédients :\n  - <ingrédient 1>\n  - <ingrédient 2>\n  ...\n"
-        "- Instructions :\n  1. <étape 1>\n  2. <étape 2>\n  ...\n\n"
-        "Sépare chaque recette par '---'.";
-
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $openAIApiKey',
-        },
-        body: jsonEncode({
-          'model': 'gpt-4o-mini',
-          'messages': [
-            {'role': 'user', 'content': prompt},
-          ],
-          'max_tokens': 1000,
-          'temperature': 0.7,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final String result = data['choices'][0]['message']['content'];
-
-        final parsedRecettes = _parseRecettes(result);
-
-        setState(() {
-          recettes = parsedRecettes;
-          isLoading = false;
-        });
-        return parsedRecettes;
-      } else {
-        setState(() {
-          erreur = "Erreur API : ${response.statusCode}";
-          isLoading = false;
-        });
-        return [];
-      }
-    } catch (e) {
-      setState(() {
-        erreur = "Erreur : $e";
-        isLoading = false;
-      });
-      return [];
-    }
+  void _onTriChanged(TriType selected) {
+    setState(() {
+      _triType = selected;
+      _filtrerEtTrier();
+    });
   }
 
-  List<Recette> _parseRecettes(String texte) {
-    final recettesParsed = <Recette>[];
+  void _onFiltreChanged(FiltreIngredients selected) {
+    setState(() {
+      _filtre = selected;
+      _filtrerEtTrier();
+    });
+  }
 
-    final recettesBrutes = texte.split('---');
+  void _onSearchChanged(String query) {
+    setState(() {
+      _searchQuery = query.toLowerCase();
+      _filtrerEtTrier();
+    });
+  }
 
-    for (var recetteBrute in recettesBrutes) {
-      if (recetteBrute.trim().isEmpty) continue;
+  void _filtrerEtTrier() {
+    List<Map<String, dynamic>> temp = List.from(_allRecettes);
 
-      String titre = '';
-      List<String> ingredients = [];
-      List<String> instructions = [];
-
-      final titreMatch = RegExp(
-        r'Titre\s*:\s*(.*?)\n',
-        caseSensitive: false,
-      ).firstMatch(recetteBrute);
-      if (titreMatch != null) {
-        titre = titreMatch.group(1)!.trim();
-      }
-
-      final ingMatch = RegExp(
-        r'Ingrédients\s*:\s*\n([\s\S]*?)(?=\nInstructions\s*:|$)',
-        caseSensitive: false,
-      ).firstMatch(recetteBrute);
-      if (ingMatch != null) {
-        final ingText = ingMatch.group(1)!.trim();
-        ingredients = ingText
-            .split('\n')
-            .map((e) => e.replaceAll(RegExp(r'^[-\d\.\)\s]+'), '').trim())
-            .where((e) => e.isNotEmpty)
-            .toList();
-      }
-
-      final instrMatch = RegExp(
-        r'Instructions\s*:\s*\n([\s\S]*?)(?=$|\n---)',
-        caseSensitive: false,
-      ).firstMatch(recetteBrute);
-      if (instrMatch != null) {
-        final instrText = instrMatch.group(1)!.trim();
-        instructions = instrText
-            .split('\n')
-            .map((e) => e.replaceAll(RegExp(r'^\d+\.\s*'), '').trim())
-            .where((e) => e.isNotEmpty)
-            .toList();
-      }
-
-      if (titre.isNotEmpty &&
-          ingredients.isNotEmpty &&
-          instructions.isNotEmpty) {
-        recettesParsed.add(
-          Recette(
-            titre: titre,
-            ingredients: ingredients,
-            instructions: instructions,
-          ),
-        );
-      }
+    if (_searchQuery.isNotEmpty) {
+      temp = temp
+          .where(
+            (r) =>
+                r['titre']?.toString().toLowerCase().contains(_searchQuery) ??
+                false,
+          )
+          .toList();
     }
 
-    return recettesParsed;
+    temp = temp.where((recette) {
+      final List ingredients = recette['ingredients'] ?? [];
+      final titre = recette['titre'].toString();
+
+      final missing = ingredients
+          .where(
+            (i) => !_ingredientsPossedes.contains(i.toString().toLowerCase()),
+          )
+          .length;
+
+      switch (_filtre) {
+        case FiltreIngredients.aucunManquant:
+          return missing == 0;
+        case FiltreIngredients.unManquant:
+          return missing <= 1;
+        case FiltreIngredients.deuxManquants:
+          return missing <= 2;
+        case FiltreIngredients.troisManquants:
+          return missing <= 3;
+        case FiltreIngredients.favoris:
+          return _favorisTitres.contains(titre);
+        case FiltreIngredients.tous:
+        default:
+          return true;
+      }
+    }).toList();
+
+    temp.sort((a, b) {
+      switch (_triType) {
+        case TriType.nomCroissant:
+          return a['titre'].toString().toLowerCase().compareTo(
+            b['titre'].toString().toLowerCase(),
+          );
+        case TriType.nomDecroissant:
+          return b['titre'].toString().toLowerCase().compareTo(
+            a['titre'].toString().toLowerCase(),
+          );
+        case TriType.ingredientsCroissant:
+          return (a['ingredients'] as List).length.compareTo(
+            (b['ingredients'] as List).length,
+          );
+        case TriType.ingredientsDecroissant:
+          return (b['ingredients'] as List).length.compareTo(
+            (a['ingredients'] as List).length,
+          );
+        case TriType.nouveaute:
+          return _allRecettes.indexOf(b).compareTo(_allRecettes.indexOf(a));
+      }
+    });
+
+    setState(() {
+      _displayedRecettes = temp;
+    });
+  }
+
+  Future<void> _toggleFavori(String titre) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final favRef = FirebaseFirestore.instance
+        .collection('utilisateurs')
+        .doc(uid)
+        .collection('favoris')
+        .doc(titre);
+
+    if (_favorisTitres.contains(titre)) {
+      await favRef.delete();
+      _favorisTitres.remove(titre);
+    } else {
+      await favRef.set({'ajoute_le': FieldValue.serverTimestamp()});
+      _favorisTitres.add(titre);
+    }
+
+    _filtrerEtTrier();
   }
 
   @override
@@ -1600,74 +1695,172 @@ class _RecettesEcranState extends State<RecettesEcran> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recettes'),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.settings),
-            tooltip: 'Paramètres',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfilEcran()),
-              );
-            },
+        foregroundColor: Colors.black,
+        actions: [_buildTriMenu(), _buildFiltreMenu()],
+      ),
+      body: Column(
+        children: [
+          _buildSearchBar(),
+          Expanded(
+            child: _displayedRecettes.isEmpty
+                ? const Center(child: Text('Aucune recette disponible'))
+                : ListView.builder(
+                    itemCount: _displayedRecettes.length,
+                    itemBuilder: (context, index) {
+                      final recette = _displayedRecettes[index];
+                      final titre = recette['titre'].toString();
+                      final isFavori = _favorisTitres.contains(titre);
+                      final ingredients = (recette['ingredients'] as List)
+                          .cast<String>();
+
+                      // Nombre d'ingrédients possédés dans cette recette
+                      final possedesCount = ingredients
+                          .where(
+                            (i) =>
+                                _ingredientsPossedes.contains(i.toLowerCase()),
+                          )
+                          .length;
+
+                      return ListTile(
+                        leading: recette['image_url'] != null
+                            ? Image.network(
+                                recette['image_url'],
+                                width: 60,
+                                height: 60,
+                                fit: BoxFit.cover,
+                              )
+                            : const Icon(Icons.image),
+                        title: Text(titre),
+                        subtitle: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('${ingredients.length} ingrédients'),
+                            Text(
+                              '$possedesCount/${ingredients.length}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                        trailing: IconButton(
+                          icon: Icon(
+                            isFavori ? Icons.favorite : Icons.favorite_border,
+                            color: isFavori ? Colors.red : null,
+                          ),
+                          onPressed: () => _toggleFavori(titre),
+                        ),
+                        onTap: () => _showRecetteDialog(context, recette),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : erreur != null
-          ? Center(child: Text(erreur!))
-          : recettes == null || recettes!.isEmpty
-          ? const Center(child: Text("Aucune recette générée."))
-          : ListView.builder(
-              itemCount: recettes!.length,
-              itemBuilder: (context, index) {
-                final recette = recettes![index];
-                return Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Card(
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            recette.titre,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Ingrédients :',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          ...recette.ingredients.map(
-                            (ingredient) => Text('• $ingredient'),
-                          ),
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Instructions :',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          ...recette.instructions.asMap().entries.map(
-                            (entry) => Text('${entry.key + 1}. ${entry.value}'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
+    );
+  }
+
+  Widget _buildTriMenu() {
+    return PopupMenuButton<TriType>(
+      onSelected: _onTriChanged,
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: TriType.nomCroissant, child: Text('Nom A-Z')),
+        PopupMenuItem(value: TriType.nomDecroissant, child: Text('Nom Z-A')),
+        PopupMenuItem(
+          value: TriType.ingredientsCroissant,
+          child: Text('Ingrédients ↑'),
+        ),
+        PopupMenuItem(
+          value: TriType.ingredientsDecroissant,
+          child: Text('Ingrédients ↓'),
+        ),
+        PopupMenuItem(value: TriType.nouveaute, child: Text('Nouveauté')),
+      ],
+      icon: const Icon(Icons.sort, color: Colors.black),
+    );
+  }
+
+  Widget _buildFiltreMenu() {
+    return PopupMenuButton<FiltreIngredients>(
+      onSelected: _onFiltreChanged,
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: FiltreIngredients.tous, child: Text('Toutes')),
+        PopupMenuItem(
+          value: FiltreIngredients.favoris,
+          child: Text('Favoris ❤️'),
+        ),
+        PopupMenuItem(
+          value: FiltreIngredients.aucunManquant,
+          child: Text('0 manquant'),
+        ),
+        PopupMenuItem(
+          value: FiltreIngredients.unManquant,
+          child: Text('≤ 1 manquant'),
+        ),
+        PopupMenuItem(
+          value: FiltreIngredients.deuxManquants,
+          child: Text('≤ 2 manquants'),
+        ),
+        PopupMenuItem(
+          value: FiltreIngredients.troisManquants,
+          child: Text('≤ 3 manquants'),
+        ),
+      ],
+      icon: const Icon(Icons.filter_alt, color: Colors.black),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: TextField(
+        onChanged: _onSearchChanged,
+        decoration: InputDecoration(
+          hintText: 'Rechercher une recette...',
+          prefixIcon: const Icon(Icons.search),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+      ),
+    );
+  }
+
+  void _showRecetteDialog(BuildContext context, Map<String, dynamic> recette) {
+    final titre = recette['titre'] ?? '';
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(titre),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (recette['image_url'] != null)
+              Image.network(recette['image_url']),
+            const SizedBox(height: 10),
+            const Text(
+              'Ingrédients',
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _chargerIngredientsEtGenererRecette,
-        child: const Icon(Icons.refresh),
+            ...List<Widget>.from(
+              (recette['ingredients'] as List).map((i) => Text('• $i')),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Préparation',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            ...List<Widget>.from(
+              (recette['etapes'] as List).map((e) => Text('• $e')),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
       ),
     );
   }
@@ -1694,7 +1887,7 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
   }
 
   List<Map<String, dynamic>> _suggestions = [];
-  final String _rechercheTexte = '';
+  String _rechercheTexte = '';
   bool _chargementSuggestions = false;
   final TextEditingController _rechercheController = TextEditingController();
 
@@ -1782,7 +1975,7 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🛒 Liste de courses'),
+        title: const Text('Liste de courses'),
         actions: [
           IconButton(
             icon: Icon(Icons.settings),
@@ -1921,8 +2114,8 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _ouvrirAjoutProduit(context),
-        tooltip: "Ajouter un produit",
         child: const Icon(Icons.add),
+        tooltip: "Ajouter un produit",
       ),
     );
   }
@@ -2052,7 +2245,7 @@ class _CalendrierEcranState extends State<CalendrierEcran> {
         .collection('produits')
         .get();
     final produits = snapshot.docs.map((doc) {
-      final data = doc.data();
+      final data = doc.data() as Map<String, dynamic>;
       data['id'] = doc.id;
       return data;
     }).toList();
@@ -2230,7 +2423,6 @@ class _ProfilEcranState extends State<ProfilEcran> {
     _chargerInfosUtilisateur();
   }
 
-  @override
   void dispose() {
     nomController.dispose();
     super.dispose();
@@ -2319,7 +2511,6 @@ class _ProfilEcranState extends State<ProfilEcran> {
     );
   }
 
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
@@ -2647,7 +2838,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
                                     'familleId': FieldValue.delete(),
                                   }, SetOptions(merge: true));
                               setState(() {
-                                familleId = null;
+                                this.familleId = null;
                               });
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -2665,11 +2856,16 @@ class _ProfilEcranState extends State<ProfilEcran> {
             ElevatedButton.icon(
               icon: const Icon(Icons.bar_chart),
               label: const Text('Statistiques'),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const StatistiquesEcran()),
-                );
+              onPressed: () async {
+                final familleId = await getFamilleId();
+                if (familleId != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => StatistiquesEcran(familleId: familleId),
+                    ),
+                  );
+                }
               },
             ),
             ElevatedButton.icon(
@@ -2702,7 +2898,7 @@ class _ProfilEcranState extends State<ProfilEcran> {
 }
 
 class AProposEcran extends StatelessWidget {
-  const AProposEcran({super.key});
+  const AProposEcran({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -2744,11 +2940,9 @@ class AProposEcran extends StatelessWidget {
               subtitle: Text(''),
             ),
             ListTile(
-              leading: CircleAvatar(child: Text('D')),
+              leading: CircleAvatar(child: Text('C')),
               title: Text('Amine Saad-Eddine'),
-              subtitle: Text(
-                'Étudiant à l’ESIEE Paris, passionné de data. A contribué à la partie mobile et Firebase. Gardien de but à ses heures perdues.',
-              ),
+              subtitle: Text(''),
             ),
             const SizedBox(height: 24),
             const Text(
@@ -2762,122 +2956,98 @@ class AProposEcran extends StatelessWidget {
   }
 }
 
-class StatistiquesEcran extends StatefulWidget {
-  const StatistiquesEcran({super.key});
+class StatistiquesEcran extends StatelessWidget {
+  final String familleId;
+  const StatistiquesEcran({Key? key, required this.familleId})
+    : super(key: key);
 
-  @override
-  State<StatistiquesEcran> createState() => _StatistiquesEcranState();
-}
-
-class _StatistiquesEcranState extends State<StatistiquesEcran> {
-  int total = 0;
-  int consommesAvantPeremption = 0;
-  double pourcentage = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _chargerStats();
-  }
-
-  Future<void> _chargerStats() async {
-    final familleId = await getFamilleId();
-    if (familleId == null) return;
-    final snapshot = await FirebaseFirestore.instance
+  Future<Map<String, int>> getStats() async {
+    final doc = await FirebaseFirestore.instance
         .collection('familles')
         .doc(familleId)
-        .collection('produits')
+        .collection('stats')
+        .doc('global')
         .get();
-
-    int totalProduits = snapshot.docs.length;
-    int nonGaspilles = 0;
-
-    for (var doc in snapshot.docs) {
-      final data = doc.data();
-      final rawDate = data['date_de_peremption'];
-      DateTime? date;
-      if (rawDate is String && rawDate.isNotEmpty) {
-        try {
-          date = DateTime.parse(rawDate);
-        } catch (_) {
-          try {
-            date = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
-          } catch (_) {}
-        }
-      } else if (rawDate is Timestamp) {
-        date = rawDate.toDate();
-      }
-
-      final dateSupp = data['supprime_le'];
-      if (date != null && dateSupp != null) {
-        DateTime dateSuppression;
-        try {
-          dateSuppression = DateTime.parse(dateSupp);
-        } catch (_) {
-          dateSuppression = DateTime.now();
-        }
-        if (dateSuppression.isBefore(date)) {
-          nonGaspilles++;
-        }
-      }
-    }
-
-    setState(() {
-      total = totalProduits;
-      consommesAvantPeremption = nonGaspilles;
-      pourcentage = total > 0 ? (nonGaspilles / total) * 100 : 0;
-    });
+    final data = doc.data() ?? {};
+    return {
+      'total_ajoutes': data['total_ajoutes'] ?? 0,
+      'total_non_gaspilles': data['total_non_gaspilles'] ?? 0,
+      'total_gaspilles': data['total_gaspilles'] ?? 0,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Statistiques anti-gaspillage')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Card(
-          elevation: 4,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
+      appBar: AppBar(title: const Text('Statistiques')),
+      body: FutureBuilder<Map<String, int>>(
+        future: getStats(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final stats = snapshot.data!;
+          final total = stats['total_ajoutes']!;
+          final nonGaspilles = stats['total_non_gaspilles']!;
+          final gaspilles = stats['total_gaspilles']!;
+          final pourcentage = total > 0
+              ? (nonGaspilles / total * 100).toStringAsFixed(1)
+              : '0';
+
+          return Padding(
             padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Vos statistiques',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            child: Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Vos statistiques anti-gaspillage',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Produits ajoutés : $total',
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    Text(
+                      'Non gaspillés : $nonGaspilles',
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    Text(
+                      'Gaspillés : $gaspilles',
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(
+                      value: total > 0 ? nonGaspilles / total : 0,
+                      minHeight: 12,
+                      backgroundColor: Colors.grey[200],
+                      color: Colors.green,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Anti-gaspillage : $pourcentage %',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  'Produits consommés avant péremption : $consommesAvantPeremption',
-                  style: const TextStyle(fontSize: 18),
-                ),
-                Text(
-                  'Total de produits ajoutés : $total',
-                  style: const TextStyle(fontSize: 18),
-                ),
-                const SizedBox(height: 16),
-                LinearProgressIndicator(
-                  value: pourcentage / 100,
-                  minHeight: 12,
-                  backgroundColor: Colors.grey[200],
-                  color: Colors.green,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Anti-gaspillage : ${pourcentage.toStringAsFixed(1)}%',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
