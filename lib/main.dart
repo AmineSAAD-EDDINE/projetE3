@@ -111,18 +111,18 @@ Future<void> reprogrammerNotificationsPourTousLesProduits(
   for (var doc in snapshot.docs) {
     final data = doc.data();
     final nom = data['nom'];
-    final rawDate = data['date_de_peremption'];
+    final datePeremption = data['date_de_peremption'];
     DateTime? date;
-    if (rawDate is String && rawDate.isNotEmpty) {
+    if (datePeremption is String && datePeremption.isNotEmpty) {
       try {
-        date = DateTime.parse(rawDate);
+        date = DateTime.parse(datePeremption);
       } catch (_) {
         try {
-          date = DateFormat('dd/MM/yyyy').parseStrict(rawDate);
+          date = DateFormat('dd/MM/yyyy').parseStrict(datePeremption);
         } catch (_) {}
       }
-    } else if (rawDate is Timestamp) {
-      date = rawDate.toDate();
+    } else if (datePeremption is Timestamp) {
+      date = datePeremption.toDate();
     }
     if (nom != null && date != null) {
       await planifierNotificationProduit(
@@ -947,23 +947,18 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                         datePeremption = rawDate.toDate();
                                       }
                                       final maintenant = DateTime.now();
-
-                                      // Référence du doc stats
                                       final statsRef = FirebaseFirestore
                                           .instance
                                           .collection('familles')
                                           .doc(familleId)
                                           .collection('stats')
                                           .doc('global');
-
-                                      // Quantité supprimée (result ou 1)
                                       final quantiteSupprimee = (result ?? 1);
 
                                       if (datePeremption != null) {
                                         if (maintenant.isBefore(
                                           datePeremption,
                                         )) {
-                                          // Consommé avant péremption
                                           await statsRef.set({
                                             'total_non_gaspilles':
                                                 FieldValue.increment(
@@ -971,7 +966,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                                 ),
                                           }, SetOptions(merge: true));
                                         } else {
-                                          // Supprimé après péremption
                                           await statsRef.set({
                                             'total_gaspilles':
                                                 FieldValue.increment(
@@ -980,7 +974,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                           }, SetOptions(merge: true));
                                         }
                                       }
-                                      // Optionnel : total supprimés
                                       await statsRef.set({
                                         'total_ajoutes': FieldValue.increment(
                                           quantiteSupprimee,
