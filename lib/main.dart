@@ -1848,29 +1848,33 @@ class _RecettesEcranState extends State<RecettesEcran> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text(titre),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (recette['image_url'] != null)
-              Image.network(recette['image_url']),
-            const SizedBox(height: 10),
-            const Text(
-              'Ingrédients',
-              style: TextStyle(fontWeight: FontWeight.bold),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (recette['image_url'] != null)
+                  Image.network(recette['image_url']),
+                const SizedBox(height: 10),
+                const Text(
+                  'Ingrédients',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                ...List<Widget>.from(
+                  (recette['ingredients'] as List).map((i) => Text('• $i')),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Préparation',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                ...List<Widget>.from(
+                  (recette['etapes'] as List).map((e) => Text('• $e')),
+                ),
+              ],
             ),
-            ...List<Widget>.from(
-              (recette['ingredients'] as List).map((i) => Text('• $i')),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Préparation',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            ...List<Widget>.from(
-              (recette['etapes'] as List).map((e) => Text('• $e')),
-            ),
-          ],
+          ),
         ),
         actions: [
           TextButton(
