@@ -605,7 +605,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
         .doc(familleId)
         .collection('produits')
         .get();
-    final ingredientsExpiringSoon = <String>[];
 
     for (var doc in snapshot.docs) {
       final data = doc.data();
@@ -624,15 +623,22 @@ class _AccueilEcranState extends State<AccueilEcran> {
         expirationDate = rawDate.toDate();
       }
 
-      if (expirationDate != null) {
-        final daysUntilExpiration = expirationDate
-            .difference(currentDate)
-            .inDays;
-        if (daysUntilExpiration <= 2 && daysUntilExpiration >= 0) {
-          if (data['nom'] != null && data['nom'].toString().isNotEmpty) {
-            ingredientsExpiringSoon.add(data['nom'].toString());
-          }
-        }
+      if (expirationDate != null && expirationDate.isBefore(currentDate)) {
+        await flutterLocalNotificationsPlugin.show(
+          data['nom'].hashCode,
+          'Produit périmé',
+          '${data['nom']} est déjà périmé !',
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'expiration_channel',
+              'Expiration Notifications',
+              channelDescription:
+                  'Notifications pour les produits proches de la péremption',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+        );
       }
     }
   }
@@ -1322,21 +1328,43 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
     cleaned = cleaned.replaceAll(RegExp(r'\s+'), '');
 
     final List<RegExp> regexList = [
-      RegExp(
-        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})',
-      ), // 12/06/2025 ou 12-06-2025 ou 12.06.2025
-      RegExp(
-        r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})',
-      ), // 2025/06/12 ou 2025-06-12 ou 2025.06.12
-      RegExp(
-        r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})',
-      ), // 12/06/25 ou 12-06-25 ou 12.06.25
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})'),
+      RegExp(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
+      RegExp(r'(\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})'),
+      RegExp(r'(\d{2}[\/\-\.]\d{2})'),
+      RegExp(r'(\d{8})'),
+      RegExp(r'(\d{6})'),
+      RegExp(r'(\d{4})'),
     ];
 
     for (var regex in regexList) {
       final match = regex.firstMatch(cleaned);
       if (match != null) {
-        return match.group(0);
+        String? raw = match.group(0);
+        if (raw != null) {
+          List<String> formats = [
+            'dd/MM/yyyy',
+            'dd-MM-yyyy',
+            'dd.MM.yyyy',
+            'dd/MM/yy',
+            'dd-MM-yy',
+            'dd.MM.yy',
+            'yyyy/MM/dd',
+            'yyyy-MM-dd',
+            'yyyy.MM.dd',
+            'dd/MM',
+            'dd-MM',
+            'dd.MM',
+            'ddMMyyyy',
+            'ddMMyy',
+          ];
+          for (var f in formats) {
+            try {
+              DateTime d = DateFormat(f).parseStrict(raw);
+              return DateFormat('dd/MM/yyyy').format(d);
+            } catch (_) {}
+          }
+        }
       }
     }
     return null;
@@ -1353,14 +1381,18 @@ class _ResultatEcranScanState extends State<ResultatEcranScan> {
 
     DateTime? date;
 
-    List<DateFormat> tryFormats = [
-      DateFormat('dd/MM/yyyy'),
-      DateFormat('dd-MM-yyyy'),
-      DateFormat('yyyy-MM-dd'),
-      DateFormat('yyyy/MM/dd'),
-      DateFormat('dd/MM/yy'),
-      DateFormat('dd-MM-yy'),
+    List<String> formats = [
+      'dd-MM-yy',
+      'dd/MM/yy',
+      'dd-MM-yyyy',
+      'dd/MM/yyyy',
+      'dd-MM',
+      'dd/MM',
+      'ddMMyy',
+      'ddMMyyyy',
+      'ddMM',
     ];
+    List<DateFormat> tryFormats = formats.map((f) => DateFormat(f)).toList();
 
     for (var format in tryFormats) {
       try {
@@ -2920,22 +2952,30 @@ class AProposEcran extends StatelessWidget {
             ListTile(
               leading: CircleAvatar(child: Text('A')),
               title: Text('Daryl Coddeville'),
-              subtitle: Text(''),
+              subtitle: Text(
+                'Daryl, 22 ans, étudiant à Esiee Paris en filière Data et Application. J ai choisi de travailler sur cette application car elle répond aux besoins concrets des utilisateurs et elle permet de lutter contre le gaspillage alimentaire.',
+              ),
             ),
             ListTile(
               leading: CircleAvatar(child: Text('B')),
               title: Text('Maxence Delehelle'),
-              subtitle: Text(''),
+              subtitle: Text(
+                'étudiant ingénieur à ESIEE PARIS en filière Data et Applications. Je suis convaincu que les enjeux environnementaux et societaux sont les défis de demain pour les ingénieurs',
+              ),
             ),
             ListTile(
               leading: CircleAvatar(child: Text('C')),
               title: Text('Amine El Mouttaki'),
-              subtitle: Text(''),
+              subtitle: Text(
+                "Étudiant en informatique à l’ESIEE Paris, j’ai géré la partie back-end de MonFrigo+, notamment l’intégration de Firebase et la gestion du frigo partagé. Passionné de musculation et de football, je suis motivé par les projets concrets et collaboratifs.",
+              ),
             ),
             ListTile(
               leading: CircleAvatar(child: Text('C')),
               title: Text('Amine Saad-Eddine'),
-              subtitle: Text(''),
+              subtitle: Text(
+                "Étudiant en ingénierie à l’ESIEE Paris, je me spécialise en Data et Applications. Passionné par la technologie et soucieux des enjeux environnementaux, j’ai co-développé MonFrigo+, une application mobile destinée à lutter contre le gaspillage alimentaire.",
+              ),
             ),
             const SizedBox(height: 24),
             const Text(
