@@ -815,7 +815,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
                   final image = p['image'];
                   final estPerime =
                       date != null && date.isBefore(DateTime.now());
-                  final docId = p.id;
                   return Card(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -2769,106 +2768,96 @@ class _ProfilEcranState extends State<ProfilEcran> {
                       icon: const Icon(Icons.notifications_active),
                       label: const Text("Enregistrer"),
                     ),
-                    ElevatedButton(
-                      onPressed: familleId != null
-                          ? null
-                          : () async {
-                              final nomCtrl = TextEditingController();
-                              final nom = await showDialog<String>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text("Nom de la famille"),
-                                  content: TextField(
-                                    controller: nomCtrl,
-                                    decoration: const InputDecoration(
-                                      labelText: "Nom de la famille",
-                                    ),
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(context),
-                                      child: const Text("Annuler"),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(
-                                        context,
-                                        nomCtrl.text.trim(),
-                                      ),
-                                      child: const Text("Créer"),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (nom != null && nom.isNotEmpty) {
-                                await creerFamille(nom);
-                                await _chargerInfosUtilisateur();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text("Famille créée !"),
-                                  ),
-                                );
-                              }
-                            },
-                      child: Text(
-                        familleId != null
-                            ? "Famille déjà créée"
-                            : "Créer une famille",
-                      ),
-                    ),
-
-                    ElevatedButton(
-                      onPressed: () async {
-                        final familleId = await _demanderFamilleId(context);
-                        if (familleId != null && familleId.isNotEmpty) {
-                          final ok = await rejoindreFamille(familleId);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                ok
-                                    ? "Famille rejointe !"
-                                    : "Famille introuvable",
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text("Rejoindre une famille"),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: familleId == null
-                          ? null
-                          : () async {
-                              final user = FirebaseAuth.instance.currentUser;
-                              if (user == null) return;
-                              await FirebaseFirestore.instance
-                                  .collection('familles')
-                                  .doc(familleId)
-                                  .update({
-                                    'membres': FieldValue.arrayRemove([
-                                      user.uid,
-                                    ]),
-                                  });
-                              await FirebaseFirestore.instance
-                                  .collection('utilisateurs')
-                                  .doc(user.uid)
-                                  .set({
-                                    'familleId': FieldValue.delete(),
-                                  }, SetOptions(merge: true));
-                              setState(() {
-                                this.familleId = null;
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text("Vous avez quitté la famille."),
-                                ),
-                              );
-                            },
-                      icon: const Icon(Icons.exit_to_app),
-                      label: const Text("Quitter la famille"),
-                    ),
                   ],
                 ),
               ),
+            ),
+            ElevatedButton(
+              onPressed: familleId != null
+                  ? null
+                  : () async {
+                      final nomCtrl = TextEditingController();
+                      final nom = await showDialog<String>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text("Nom de la famille"),
+                          content: TextField(
+                            controller: nomCtrl,
+                            decoration: const InputDecoration(
+                              labelText: "Nom de la famille",
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text("Annuler"),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(context, nomCtrl.text.trim()),
+                              child: const Text("Créer"),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (nom != null && nom.isNotEmpty) {
+                        await creerFamille(nom);
+                        await _chargerInfosUtilisateur();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Famille créée !")),
+                        );
+                      }
+                    },
+              child: Text(
+                familleId != null ? "Famille déjà créée" : "Créer une famille",
+              ),
+            ),
+
+            ElevatedButton(
+              onPressed: () async {
+                final familleId = await _demanderFamilleId(context);
+                if (familleId != null && familleId.isNotEmpty) {
+                  final ok = await rejoindreFamille(familleId);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        ok ? "Famille rejointe !" : "Famille introuvable",
+                      ),
+                    ),
+                  );
+                }
+              },
+              child: const Text("Rejoindre une famille"),
+            ),
+            ElevatedButton.icon(
+              onPressed: familleId == null
+                  ? null
+                  : () async {
+                      final user = FirebaseAuth.instance.currentUser;
+                      if (user == null) return;
+                      await FirebaseFirestore.instance
+                          .collection('familles')
+                          .doc(familleId)
+                          .update({
+                            'membres': FieldValue.arrayRemove([user.uid]),
+                          });
+                      await FirebaseFirestore.instance
+                          .collection('utilisateurs')
+                          .doc(user.uid)
+                          .set({
+                            'familleId': FieldValue.delete(),
+                          }, SetOptions(merge: true));
+                      setState(() {
+                        this.familleId = null;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Vous avez quitté la famille."),
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.exit_to_app),
+              label: const Text("Quitter la famille"),
             ),
             ElevatedButton.icon(
               icon: const Icon(Icons.bar_chart),
