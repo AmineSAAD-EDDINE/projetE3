@@ -409,7 +409,7 @@ class EcranPrincipal extends StatefulWidget {
 }
 
 class _EcranPrincipalState extends State<EcranPrincipal> {
-  int _selectedIndex = 2;
+  int _selectedIndex = 0;
 
   final List<Widget> _screens = const [
     AccueilEcran(),
@@ -1077,19 +1077,16 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                   }
                                   final maintenant = DateTime.now();
 
-                                  // Référence du doc stats
                                   final statsRef = FirebaseFirestore.instance
                                       .collection('familles')
                                       .doc(familleId)
                                       .collection('stats')
                                       .doc('global');
 
-                                  // Quantité supprimée (result ou 1)
                                   final quantiteSupprimee = (quantite ?? 1);
 
                                   if (datePeremption != null) {
                                     if (maintenant.isBefore(datePeremption)) {
-                                      // Consommé avant péremption
                                       await statsRef.set({
                                         'total_non_gaspilles':
                                             FieldValue.increment(
@@ -1097,7 +1094,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                             ),
                                       }, SetOptions(merge: true));
                                     } else {
-                                      // Supprimé après péremption
                                       await statsRef.set({
                                         'total_gaspilles': FieldValue.increment(
                                           quantiteSupprimee,
@@ -1105,7 +1101,6 @@ class _AccueilEcranState extends State<AccueilEcran> {
                                       }, SetOptions(merge: true));
                                     }
                                   }
-                                  // Optionnel : total supprimés
                                   await statsRef.set({
                                     'total_ajoutes': FieldValue.increment(
                                       quantiteSupprimee,
@@ -1258,8 +1253,7 @@ class _ScanEcranState extends State<ScanEcran> {
                       builder: (_) => ResultatEcranScan(
                         nomProduit: produitInfo.nom,
                         imageUrl: produitInfo.imageUrl,
-                        codeBarres: codeBarresController.text
-                            .trim(), // <-- Ajoute ceci
+                        codeBarres: codeBarresController.text.trim(), //
                       ),
                     ),
                   );
@@ -1738,7 +1732,6 @@ class _RecettesEcranState extends State<RecettesEcran> {
                       final ingredients = (recette['ingredients'] as List)
                           .cast<String>();
 
-                      // Nombre d'ingrédients possédés dans cette recette
                       final possedesCount = ingredients
                           .where(
                             (i) =>
@@ -2077,7 +2070,6 @@ class _ListeCoursesEcranState extends State<ListeCoursesEcran> {
                           margin: const EdgeInsets.symmetric(vertical: 8),
                           color: achete ? Colors.green[50] : Colors.white,
                           child: ListTile(
-                            // Supprime le leading si tu veux enlever le rond
                             title: Text(
                               nom,
                               style: TextStyle(
@@ -2929,7 +2921,7 @@ class AProposEcran extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('À propos de nous')),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -3068,7 +3060,7 @@ class StatistiquesEcran extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Anti-gaspillage : $pourcentage %',
+                      '$pourcentage % de produits non gaspillés !',
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
